@@ -29,7 +29,7 @@ jobs:
           - ubuntu-latest
           - macos-latest
         rust:
-          - 1.88.0 # MSRV, matching certval
+          - 1.89.0 # MSRV
           - stable
     runs-on: ${{ matrix.os }}
     steps:
