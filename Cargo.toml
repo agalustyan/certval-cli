@@ -11,7 +11,7 @@ categories = ["command-line-utilities", "cryptography"]
 keywords = ["x509", "pki", "certval", "ocsp", "cli"]
 readme = "README.md"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.89"
 include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE-APACHE", "LICENSE-MIT"]
 
 [[bin]]
@@ -19,7 +19,7 @@ name = "certval"
 path = "src/main.rs"
 
 [dependencies]
-certval = { version = "0.2.0-rc.1", features = ["remote", "rsa"] }
+certval = { version = "0.2.0-rc.1", features = ["remote", "rsa", "pqc"] }
 certval_stores_core = "0.1.0-rc.1"
 certval_stores_fpki = "1.0.0-rc.1"
 certval_stores_webpki_root_certs = "1.0.0-rc.1"
