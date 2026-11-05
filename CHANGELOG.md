@@ -5,6 +5,13 @@ an increase to the minimum supported Rust version is not treated as a breaking c
 ## Unreleased
 
 - `verify` checks ML-DSA and SLH-DSA signatures: certval is built with its `pqc` feature.
+- `cms encrypt`, `cms decrypt`, `cms sign` and `cms verify`, by certval-cms: EnvelopedData and
+  AuthEnvelopedData to RSA (key transport), EC (key agreement) and ML-KEM (KEM) recipients, and
+  SignedData with RSA PKCS #1 v1.5 and RSASSA-PSS, ECDSA and ML-DSA, detached or not, with each
+  signer's certificate validated against trust anchors or a store when named.
+- `--crypto` chooses the implementation that performs the cryptographic operations of `verify` and
+  the `cms` commands: certval's software, or with the `openssl` feature, OpenSSL through
+  certval-openssl. `--only` leaves software out.
 
 ## [0.1.0-rc.1] - 2026-10-31
 

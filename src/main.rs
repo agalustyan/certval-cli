@@ -5,10 +5,13 @@
 //! The command names follow openssl's; the flags do not.
 
 mod asn1parse;
+mod cms;
 mod crl;
+mod crypto;
 mod display;
 mod input;
 mod ocsp;
+mod trust;
 mod verify;
 mod x509;
 
@@ -40,6 +43,9 @@ enum Command {
     Verify(verify::Args),
     /// Query an OCSP responder, or describe a saved response
     Ocsp(ocsp::Args),
+    /// Encrypt, decrypt, sign and verify CMS messages
+    #[command(subcommand)]
+    Cms(cms::Command),
 }
 
 /// Restores the default action for SIGPIPE, which Rust programs otherwise ignore, so that output
@@ -80,6 +86,7 @@ async fn run(cli: Cli) -> ExitCode {
         Command::Asn1parse(args) => asn1parse::run(&args).map(|()| true),
         Command::Verify(args) => verify::run(&args).await,
         Command::Ocsp(args) => ocsp::run(&args).await.map(|()| true),
+        Command::Cms(command) => cms::run(&command),
     };
     match outcome {
         Ok(true) => ExitCode::SUCCESS,

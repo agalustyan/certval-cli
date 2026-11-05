@@ -1,8 +1,10 @@
 # certval-cli
 
-`certval`, an openssl-style command-line tool for X.509 certificates, CRLs, OCSP and DER, with
+`certval`, an openssl-style command-line tool for X.509 certificates, CRLs, OCSP, CMS and DER, with
 certification path validation by [certval](https://github.com/carl-wallace/rust-pki): RFC 5280 and
 RFC 5937, including certificate policies, name constraints and cross-certified (bridge) topologies.
+CMS messages are encrypted, decrypted, signed and verified by
+[certval-cms](https://github.com/carl-wallace/certval-cms).
 
 ```sh
 cargo install certval-cli
@@ -73,6 +75,40 @@ policy set, name constraint and key usage handling. Revocation is not checked un
 (repeatable) names CRLs to consult first, as `openssl verify -CRLfile` does; beyond those, CRLs
 and OCSP responses are fetched over the network.
 
+`--crypto` chooses the implementation that hashes and verifies signatures; see [Choosing the
+cryptography](#choosing-the-cryptography).
+
+### `certval cms` encrypts, decrypts, signs and verifies
+
+```sh
+certval cms encrypt --recip alice.crt --recip bob.crt --in message.txt --out message.der
+certval cms decrypt --in message.der --cert alice.crt --key alice.key --out message.txt
+certval cms sign --in message.txt --cert signer.crt --key signer.key --out signed.der
+certval cms verify --in signed.der --anchor ca.crt --out message.txt
+```
+
+```text
+$ certval cms verify --in signed.der --anchor ca.crt
+signer CN=signer: signature verified, certificate validated
+```
+
+`encrypt` makes an AuthEnvelopedData for a GCM `--content` algorithm (the default, AES-256-GCM) and
+an EnvelopedData for CBC. Each recipient's certificate decides its recipient type: key transport
+for an RSA key (`--key-transport`, RSAES-OAEP with SHA-256 by default), key agreement for an EC key
+and a KEM for an ML-KEM key (`--kdf`, `--wrap` and `--ukm`). `decrypt` takes the recipient's
+certificate and its PKCS #8 private key.
+
+`sign` signs with the PKCS #8 key for `--cert`, with `--digest`, and `--pss` for RSASSA-PSS. It
+adds the content-type, message-digest and signing-certificate-v2 attributes; `--no-ess-cert-id`
+leaves out the last. `--detached` leaves the content out, `--include none` leaves the signer's
+certificate out, and `--certfile` adds certificates such as intermediates. `verify` verifies each
+signer's signature, and with `--anchor` or `--store` validates its certificate too, through the CA
+certificates the message contains and any `--chain`. `--content` names the content of a detached
+signature, and `--policy any` accepts a message if any signer verifies.
+
+Messages are read as DER or PEM and written as DER, or as PEM (`--outform pem`) labelled `CMS`,
+which `openssl cms` reads with `-inform DER` or `-inform PEM`. S/MIME is neither read nor written.
+
 ### `certval ocsp` queries a responder
 
 ```sh
@@ -86,6 +122,23 @@ update, and with `--nonce` whether the nonce was echoed. **The response's signat
 verified**, and the output says so: certval verifies OCSP responses as part of checking a path.
 `certval verify --check-revocation` is the command that does that.
 
+## Choosing the cryptography
+
+`verify` and the `cms` commands take `--crypto`, which chooses the implementation that performs
+their cryptographic operations: `software`, certval's and certval-cms's RustCrypto software (the
+default), or `openssl`, the system's OpenSSL 3 through
+[certval-openssl](https://github.com/carl-wallace/certval-openssl). The choice is registered ahead
+of software, so software answers only what it declines; `--only` leaves software out, so that
+every operation reaches the chosen implementation or fails. The private key operations of
+`cms decrypt` and `cms sign` are performed by the chosen implementation either way.
+
+`openssl` is offered by a build with the `openssl` feature, which needs OpenSSL 3 to build and is
+not available on Windows:
+
+```sh
+cargo install certval-cli --features openssl
+```
+
 ## Exit codes
 
 | Code | Meaning |
@@ -96,7 +149,7 @@ verified**, and the output says so: certval verifies OCSP responses as part of c
 
 ## Not yet
 
-The commands that create things (`req`, `x509 -req`, `ca`, `pkcs12`, `cms`, `ts`) are not here yet.
+The commands that create things (`req`, `x509 -req`, `ca`, `pkcs12`, `ts`) are not here yet.
 Their building blocks exist, but several depend on crates that have no compatible crates.io release,
 and a published crate cannot depend on git.
 
@@ -108,6 +161,22 @@ example files, named by an environment variable; when it is unset they say so an
 ```sh
 CERTVAL_CLI_EXAMPLES=../rust-pki/certval/tests/examples cargo test
 ```
+
+The CMS tests run the binary against `openssl cms` in both directions, under each `--crypto`
+choice with `--only`: what openssl encrypts or signs, `certval cms` decrypts or verifies, and the
+reverse, with RSA, EC, ML-KEM and ML-DSA keys from a CA they make with openssl.
+`CERTVAL_CMS_OPENSSL` names the `openssl` command; when it is unset they say so and pass. ML-KEM
+and ML-DSA need OpenSSL 3.5 or later, and ML-KEM in CMS 3.6; with an older openssl those cases
+are skipped and say so.
+
+```sh
+CERTVAL_CMS_OPENSSL=$(command -v openssl) cargo test --features openssl -- --nocapture
+```
+
+certval-cms is not on crates.io yet, and certval-openssl's `cms` feature is not released, so
+`Cargo.toml`'s `[patch.crates-io]` takes both from neighboring checkouts (`../certval-cms`,
+`../certval-openssl`), and CI checks them out there. Both go when they publish, and this crate
+cannot publish before they do.
 
 ## License
 

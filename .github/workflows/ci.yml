@@ -33,14 +33,30 @@ jobs:
           - stable
     runs-on: ${{ matrix.os }}
     steps:
-      # certval comes from crates.io, so no sibling checkout is needed here.
       - uses: actions/checkout@v7
         with:
           path: certval-cli
+      # certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so
+      # Cargo.toml's [patch.crates-io] takes both from neighboring checkouts, which these are. They
+      # go once both publish.
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-cms
+          path: certval-cms
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-openssl
+          path: certval-openssl
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
       - run: cargo build --all-targets
+      # The openssl feature links the system's OpenSSL 3, which the Ubuntu image provides as a
+      # package; it is built on Linux only.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - if: runner.os == 'Linux'
+        run: cargo build --all-targets --features openssl
 
   # Lints run on stable only, deliberately not across the build matrix: clippy's diagnostics differ
   # between toolchains, so linting against the MSRV pin reports on a compiler nobody develops with.
@@ -52,12 +68,24 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: certval-cli
+      # certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so
+      # Cargo.toml's [patch.crates-io] takes both from neighboring checkouts, which these are. They
+      # go once both publish.
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-cms
+          path: certval-cms
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-openssl
+          path: certval-openssl
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
           # Not installed by default.
           components: clippy
-      # No features, so one clippy shape covers the crate.
       - run: cargo clippy --all-targets
+      - run: cargo clippy --all-targets --features openssl
 
   # A job of its own so it can be a required check without making clippy one: each Rust release
   # adds lints, and a required clippy would fail unrelated pull requests.
@@ -79,6 +107,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: certval-cli
+      # certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so
+      # Cargo.toml's [patch.crates-io] takes both from neighboring checkouts, which these are. They
+      # go once both publish.
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-cms
+          path: certval-cms
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-openssl
+          path: certval-openssl
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       # The example files the tests run the binary against live in rust-pki's test data and are
       # pointed at rather than copied. Pinned to the commit the certval release in Cargo.toml was
       # published from (certval-v0.2.0-rc.1); bump both together.
@@ -88,7 +128,69 @@ jobs:
           ref: 93104f49a8083f1e527e3b4e830581b917674e2f
           path: rust-pki
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run the unit and command tests
+      # The CMS tests run against the runner's openssl, 3.0, which offers no ML-KEM or ML-DSA, so
+      # those cases skip here; test-openssl-3-6 runs them.
+      - name: Run the unit, command and CMS tests
         env:
           CERTVAL_CLI_EXAMPLES: ${{ github.workspace }}/rust-pki/certval/tests/examples
-        run: cargo test
+          CERTVAL_CMS_OPENSSL: openssl
+        run: cargo test --features openssl -- --nocapture
+
+  # The CMS tests against an OpenSSL 3.6 built from source, both as the openssl command they run
+  # against and as the library --crypto openssl links, so that ML-KEM and ML-DSA are covered. The
+  # job fails if any case is skipped for want of a newer OpenSSL.
+  test-openssl-3-6:
+    runs-on: ubuntu-24.04
+    env:
+      OPENSSL_VERSION: 3.6.5
+      OPENSSL_SHA256: a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: certval-cli
+      # certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so
+      # Cargo.toml's [patch.crates-io] takes both from neighboring checkouts, which these are. They
+      # go once both publish.
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-cms
+          path: certval-cms
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-openssl
+          path: certval-openssl
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache the OpenSSL build
+        id: openssl-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/openssl
+          key: openssl-${{ env.OPENSSL_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build OpenSSL
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o openssl.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          echo "${OPENSSL_SHA256}  openssl.tar.gz" | sha256sum -c -
+          tar xzf openssl.tar.gz
+          cd "openssl-${OPENSSL_VERSION}"
+          ./Configure --prefix="$HOME/openssl" --libdir=lib
+          make -j"$(nproc)"
+          make install_sw
+
+      - name: Run the CMS tests against OpenSSL ${{ env.OPENSSL_VERSION }}
+        env:
+          OPENSSL_DIR: /home/runner/openssl
+          LD_LIBRARY_PATH: /home/runner/openssl/lib
+          CERTVAL_CMS_OPENSSL: /home/runner/openssl/bin/openssl
+        run: |
+          set -o pipefail
+          cargo test --features openssl --test cms -- --nocapture 2>&1 | tee "$RUNNER_TEMP/test.log"
+          if grep -n 'skipped' "$RUNNER_TEMP/test.log"; then
+            echo "a CMS case was skipped; this job exists to run them all"
+            exit 1
+          fi
