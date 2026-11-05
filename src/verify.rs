@@ -6,11 +6,12 @@
 //! Every path the sources can assemble is validated and reported, and the command succeeds when at
 //! least one is valid.
 
+use crate::crypto::CryptoArgs;
 use crate::display;
-use crate::input::{read_certs, read_der};
+use crate::input::read_der;
+use crate::trust;
 use crate::Result;
 use certval::*;
-use certval_stores_core::{prepare_certval_environment, TrustStoreProvider};
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -46,33 +47,14 @@ pub struct Args {
     /// List the stores this binary contains, then exit
     #[arg(long)]
     pub list_stores: bool,
-}
 
-/// The stores this binary contains.
-fn providers() -> Vec<&'static dyn TrustStoreProvider> {
-    vec![
-        certval_stores_fpki::provider(),
-        certval_stores_webpki_root_certs::provider(),
-    ]
+    #[command(flatten)]
+    pub crypto: CryptoArgs,
 }
 
 pub async fn run(args: &Args) -> Result<bool> {
     if args.list_stores {
-        for provider in providers() {
-            for entry in provider.entries() {
-                let cas = if entry.cert_store_cbor.is_some() {
-                    "with CA store"
-                } else {
-                    "anchors only"
-                };
-                println!(
-                    "{:<20} {:>4} anchors, {cas:<13} {}",
-                    entry.id,
-                    entry.roots.len(),
-                    entry.label
-                );
-            }
-        }
+        trust::list_stores();
         return Ok(true);
     }
 
@@ -83,76 +65,21 @@ pub async fn run(args: &Args) -> Result<bool> {
         return Err("name trust anchors with --anchor, or a store with --store".into());
     }
 
-    let mut cps = match &args.settings {
-        Some(file) => {
-            if !std::path::Path::new(file).exists() {
-                return Err(format!("settings file not found: {file}").into());
-            }
-            read_settings(&Some(file.clone()))?
-        }
-        None => {
-            let mut cps = CertificationPathSettings::default();
-            cps.set_check_revocation_status(false);
-            cps
-        }
-    };
+    let mut cps = trust::settings(args.settings.as_deref())?;
     if args.check_revocation {
         cps.set_check_revocation_status(true);
     }
     let toi = cps.get_time_of_interest();
 
-    let mut pe = PkiEnvironment::default();
-    pe.populate_5280_pki_environment();
-
-    let mut anchors_only = false;
-    if let Some(store) = &args.store {
-        let Some(entry) = providers()
-            .iter()
-            .flat_map(|p| p.entries())
-            .find(|e| e.id == *store)
-        else {
-            return Err(format!("unknown store {store}; --list-stores prints the ids").into());
-        };
-        anchors_only = entry.cert_store_cbor.is_none();
-        prepare_certval_environment(&providers(), &mut pe, store)?;
-    } else {
-        let mut ta_source = TaSource::new();
-        for file in &args.anchor {
-            for (i, bytes) in read_certs(file)?.into_iter().enumerate() {
-                ta_source.push(CertFile {
-                    filename: format!("{file}#{i}"),
-                    bytes,
-                });
-            }
-        }
-        ta_source.initialize()?;
-        pe.add_trust_anchor_source(Box::new(ta_source));
-    }
-
-    // Registered even when --chain names nothing: path building runs only through certificate
-    // sources, so without one a target issued directly by an anchor would find no path.
-    let mut cert_source = CertSource::new();
-    for file in &args.chain {
-        for (i, bytes) in read_certs(file)?.into_iter().enumerate() {
-            cert_source.push(CertFile {
-                filename: format!("{file}#{i}"),
-                bytes,
-            });
-        }
-    }
-    cert_source.initialize(&cps)?;
-    cert_source.find_all_partial_paths(&pe, &cps);
-    pe.add_certificate_source(Box::new(cert_source));
-
-    if !args.crl.is_empty() {
-        let crl_source = MemoryCrlSource::new();
-        for file in &args.crl {
-            if !crl_source.add(&read_der(file)?) {
-                return Err(format!("{file}: not a CRL").into());
-            }
-        }
-        pe.add_crl_source(Box::new(crl_source));
-    }
+    let mut pe = args.crypto.pki_environment();
+    let anchors_only = trust::add_trust(
+        &mut pe,
+        &cps,
+        &args.anchor,
+        args.store.as_deref(),
+        &args.chain,
+        &args.crl,
+    )?;
 
     let mut target_cert = PDVCertificate::try_from(read_der(target)?.as_slice())
         .map_err(|e| format!("{target}: not a certificate: {e:?}"))?;
