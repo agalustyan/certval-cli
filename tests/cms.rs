@@ -57,9 +57,12 @@ impl OpenSsl {
     }
 
     /// Runs openssl in `dir`, panicking with its error output if it fails.
+    /// The configuration is the test directory's own, so that no installation's is needed: a
+    /// source build installed with `make install_sw` has none, and `req` will not run without one.
     fn run(&self, dir: &Path, args: &[&str]) -> String {
         let output = Command::new(&self.command)
             .current_dir(dir)
+            .env("OPENSSL_CONF", dir.join("openssl.cnf"))
             .args(args)
             .output()
             .unwrap();
@@ -99,6 +102,11 @@ impl Pki {
     fn new(openssl: &OpenSsl, test: &str) -> Self {
         let dir = std::env::temp_dir().join(format!("certval-cli-{}-{test}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("openssl.cnf"),
+            "[req]\ndistinguished_name = dn\n[dn]\n",
+        )
+        .unwrap();
         let o = |args: &[&str]| openssl.run(&dir, args);
         o(&[
             "req",
@@ -142,30 +150,42 @@ impl Pki {
         }
         for (name, algorithm) in keys {
             let key = format!("{name}.key");
-            let public = format!("{name}.pub");
+            let cert = format!("{name}.crt");
+            let subject = format!("/CN={name}");
             let mut genpkey = vec!["genpkey"];
             genpkey.extend(algorithm);
             genpkey.extend(["-out", &key]);
             o(&genpkey);
-            o(&["pkey", "-in", &key, "-pubout", "-out", &public]);
-            o(&[
-                "x509",
-                "-new",
-                "-subj",
-                &format!("/CN={name}"),
-                "-force_pubkey",
-                &public,
+            let issue = [
                 "-CA",
                 "ca.crt",
                 "-CAkey",
                 "ca.key",
+                "-CAcreateserial",
                 "-days",
                 "1",
                 "-extfile",
                 "ee.ext",
                 "-out",
-                &format!("{name}.crt"),
-            ]);
+                &cert,
+            ];
+            if name == "kem" {
+                // An ML-KEM key cannot sign a request, so its certificate is made from the public
+                // key alone, with `x509 -new -force_pubkey`, which every openssl with ML-KEM has.
+                let public = format!("{name}.pub");
+                o(&["pkey", "-in", &key, "-pubout", "-out", &public]);
+                let mut x509 = vec!["x509", "-new", "-subj", &subject, "-force_pubkey", &public];
+                x509.extend(issue);
+                o(&x509);
+            } else {
+                let request = format!("{name}.csr");
+                o(&[
+                    "req", "-new", "-key", &key, "-subj", &subject, "-out", &request,
+                ]);
+                let mut x509 = vec!["x509", "-req", "-in", &request];
+                x509.extend(issue);
+                o(&x509);
+            }
         }
         std::fs::write(dir.join("message.txt"), MESSAGE).unwrap();
         Self { dir }
