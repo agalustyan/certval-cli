@@ -6,6 +6,7 @@
 
 mod asn1parse;
 mod cms;
+mod cred;
 mod crl;
 mod crypto;
 mod display;
@@ -46,6 +47,9 @@ enum Command {
     /// Encrypt, decrypt, sign and verify CMS messages
     #[command(subcommand)]
     Cms(cms::Command),
+    /// List the keys the keychain, the certificate store or a PKCS #11 token holds
+    #[command(subcommand)]
+    Cred(cred::Command),
 }
 
 /// Restores the default action for SIGPIPE, which Rust programs otherwise ignore, so that output
@@ -87,6 +91,7 @@ async fn run(cli: Cli) -> ExitCode {
         Command::Verify(args) => verify::run(&args).await,
         Command::Ocsp(args) => ocsp::run(&args).await.map(|()| true),
         Command::Cms(command) => cms::run(&command),
+        Command::Cred(command) => cred::run(&command),
     };
     match outcome {
         Ok(true) => ExitCode::SUCCESS,

@@ -3,23 +3,31 @@
 //!
 //! Messages are read as DER or PEM and written as DER, or with `--outform pem` as PEM labelled
 //! `CMS`, which `openssl cms` reads with `-inform DER` or `-inform PEM`. S/MIME is neither read nor
-//! written. Private keys are PKCS #8, DER or PEM, unencrypted.
+//! written. Private keys are PKCS #8, DER or PEM, unencrypted, or with `--crypto
+//! security-framework`, `cng` or `pkcs11`, may instead be the keychain's, the certificate store's
+//! or a token's, chosen by the message's recipient identifiers to decrypt and by `--cert`,
+//! `--email` or `--skid` to sign.
 
 use certval_cms::{
     rsa_pss, AuthEnvelopedDataBuilder, CmsEnvironment, ContentEncryptionAlgorithm, DigestAlgorithm,
     EnvelopedDataBuilder, IncludeCertificates, KdfAlgorithm, KemRecipient, KeyAgreeRecipient,
     KeyAgreementAlgorithm, KeyTransRecipient, KeyTransportAlgorithm, KeyWrapAlgorithm,
-    SignedDataBuilder, Signer, SignerPolicy, Vetting,
+    SharedSigningCredential, SignedDataBuilder, Signer, SignerPolicy, SigningCredential,
+    SigningCredentialLookup, Vetting,
 };
 use clap::ValueEnum;
+use cms::cert::IssuerAndSerialNumber;
 use cms::content_info::ContentInfo;
+use cms::enveloped_data::RecipientIdentifier;
 use cms::signed_data::SignerIdentifier;
 use const_oid::db::fips203::{ID_ALG_ML_KEM_1024, ID_ALG_ML_KEM_512, ID_ALG_ML_KEM_768};
 use const_oid::db::rfc5911::ID_DATA;
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION};
+use der::asn1::OctetString;
 use der::{Decode, Encode};
 use getrandom::SysRng;
 use rand_core::UnwrapErr;
+use x509_cert::ext::pkix::SubjectKeyIdentifier;
 use x509_cert::Certificate;
 
 use crate::crypto::CryptoArgs;
@@ -269,7 +277,7 @@ macro_rules! add_recipients {
 
 fn encrypt(args: &EncryptArgs) -> Result<bool> {
     let content = std::fs::read(&args.input).map_err(|e| format!("{}: {e}", args.input))?;
-    let env = args.crypto.cms_environment(args.crypto.pki_environment());
+    let env = args.crypto.cms_environment(args.crypto.pki_environment()?);
     let certs = args
         .recipients
         .iter()
@@ -300,12 +308,13 @@ pub struct DecryptArgs {
     pub input: String,
 
     /// The recipient's certificate, DER or PEM
-    #[arg(long, value_name = "FILE")]
-    pub cert: String,
+    #[arg(long, value_name = "FILE", requires = "key")]
+    pub cert: Option<String>,
 
-    /// The recipient's private key, PKCS #8, DER or PEM
-    #[arg(long, value_name = "FILE")]
-    pub key: String,
+    /// The recipient's private key, PKCS #8, DER or PEM. When absent, the key is the one the
+    /// --crypto implementation holds for a recipient the message names
+    #[arg(long, value_name = "FILE", requires = "cert")]
+    pub key: Option<String>,
 
     /// File to write the content to; standard output when absent
     #[arg(long, value_name = "FILE")]
@@ -317,11 +326,28 @@ pub struct DecryptArgs {
 
 fn decrypt(args: &DecryptArgs) -> Result<bool> {
     let content_info = read_message(&args.input)?;
-    let env = args.crypto.cms_environment(args.crypto.pki_environment());
-    let credential = args
-        .crypto
-        .recipient_credential(read_certificate(&args.cert)?, &read_der(&args.key)?)?;
-    let decrypted = env.decrypt_enveloped_data(&content_info, Some(credential.as_ref()))?;
+    let mut env = args.crypto.cms_environment(args.crypto.pki_environment()?);
+    let decrypted = match (&args.cert, &args.key) {
+        (Some(cert), Some(key)) => {
+            let credential = args
+                .crypto
+                .recipient_credential(read_certificate(cert)?, &read_der(key)?)?;
+            env.decrypt_enveloped_data(&content_info, Some(credential.as_ref()))?
+        }
+        _ => {
+            let store = args.crypto.store()?;
+            store.register(&mut env);
+            let decrypted = env
+                .decrypt_enveloped_data(&content_info, None)
+                .map_err(|e| format!("with a key from {}: {e}", store.description()))?;
+            eprintln!(
+                "decrypted with the key from {} for {}",
+                store.description(),
+                recipient_identifier(&decrypted.recipient)
+            );
+            decrypted
+        }
+    };
     if decrypted.content_type != ID_DATA {
         eprintln!(
             "the content is of type {}",
@@ -335,18 +361,31 @@ fn decrypt(args: &DecryptArgs) -> Result<bool> {
 // ---- sign
 
 #[derive(clap::Args)]
+#[command(group(clap::ArgGroup::new("signer").required(true).multiple(false)))]
 pub struct SignArgs {
     /// File to sign
     #[arg(long = "in", value_name = "FILE")]
     pub input: String,
 
-    /// The signer's certificate, DER or PEM
-    #[arg(long, value_name = "FILE")]
-    pub cert: String,
+    /// The signer's certificate, DER or PEM. Without --key, it chooses the key the --crypto
+    /// implementation holds for it
+    #[arg(long, value_name = "FILE", group = "signer")]
+    pub cert: Option<String>,
 
-    /// The signer's private key, PKCS #8, DER or PEM
-    #[arg(long, value_name = "FILE")]
-    pub key: String,
+    /// The signer's private key, PKCS #8, DER or PEM. When absent, the key is one the --crypto
+    /// implementation holds, chosen by --cert, --email or --skid
+    #[arg(long, value_name = "FILE", requires = "cert")]
+    pub key: Option<String>,
+
+    /// Sign with the key the --crypto implementation holds for a certificate containing this
+    /// email address and permitting signing
+    #[arg(long, value_name = "ADDRESS", group = "signer")]
+    pub email: Option<String>,
+
+    /// Sign with the key the --crypto implementation holds for the certificate with this subject
+    /// key identifier, as hex, which `certval cred list` shows
+    #[arg(long, value_name = "HEX", group = "signer")]
+    pub skid: Option<String>,
 
     /// File to write the message to
     #[arg(long, value_name = "FILE")]
@@ -384,15 +423,116 @@ pub struct SignArgs {
     pub crypto: CryptoArgs,
 }
 
+/// The signer's credential: from a key file, or held by the environment's sources.
+enum SignerCredential {
+    File(Box<dyn SigningCredential>),
+    Held(SharedSigningCredential),
+}
+
+impl SignerCredential {
+    fn credential(&self) -> &dyn SigningCredential {
+        match self {
+            SignerCredential::File(c) => c.as_ref(),
+            SignerCredential::Held(c) => c.as_ref(),
+        }
+    }
+}
+
+/// The signing credential the arguments choose.
+fn signer_credential(args: &SignArgs, env: &mut CmsEnvironment) -> Result<SignerCredential> {
+    if let (Some(cert), Some(key)) = (&args.cert, &args.key) {
+        return Ok(SignerCredential::File(
+            args.crypto
+                .signing_credential(read_certificate(cert)?, &read_der(key)?)?,
+        ));
+    }
+    let store = args.crypto.store()?;
+    store.register(env);
+    let sid;
+    let (lookup, what) = if let Some(cert) = &args.cert {
+        let cert = read_certificate(cert)?;
+        let tbs = cert.tbs_certificate();
+        sid = SignerIdentifier::IssuerAndSerialNumber(IssuerAndSerialNumber {
+            issuer: tbs.issuer().clone(),
+            serial_number: tbs.serial_number().clone(),
+        });
+        (
+            SigningCredentialLookup::Identifier(&sid),
+            format!("the certificate {}", display::name(tbs.subject())),
+        )
+    } else if let Some(skid) = &args.skid {
+        sid = SignerIdentifier::SubjectKeyIdentifier(SubjectKeyIdentifier(OctetString::new(
+            from_hex(skid)?,
+        )?));
+        (
+            SigningCredentialLookup::Identifier(&sid),
+            format!("subject key identifier {skid}"),
+        )
+    } else if let Some(email) = &args.email {
+        (
+            SigningCredentialLookup::EmailAddress(email),
+            format!("the email address {email}"),
+        )
+    } else {
+        return Err("no signer: one of --cert, --email and --skid is required".into());
+    };
+    let mut found = env.find_signing_credentials(lookup)?;
+    match found.len() {
+        0 => Err(format!(
+            "{} holds no key permitting signing for {what}",
+            store.description()
+        )
+        .into()),
+        1 => {
+            let (credential, _) = found.remove(0);
+            eprintln!(
+                "signing with the key from {} for {}",
+                store.description(),
+                display::name(credential.certificate().tbs_certificate().subject())
+            );
+            Ok(SignerCredential::Held(credential))
+        }
+        n => {
+            let mut message = format!(
+                "{} holds {n} keys permitting signing for {what}; choose one with --skid:",
+                store.description()
+            );
+            for (credential, _) in &found {
+                message.push_str(&format!(
+                    "\n    {}",
+                    describe_briefly(credential.certificate())
+                ));
+            }
+            Err(message.into())
+        }
+    }
+}
+
+/// A certificate's subject and subject key identifier, or serial number without one.
+fn describe_briefly(cert: &Certificate) -> String {
+    let tbs = cert.tbs_certificate();
+    match certval_cms::signer_identifier(cert) {
+        Ok(SignerIdentifier::SubjectKeyIdentifier(skid)) => format!(
+            "{}, subject key identifier {}",
+            display::name(tbs.subject()),
+            display::hex(skid.0.as_bytes())
+        ),
+        _ => format!(
+            "{}, serial {}",
+            display::name(tbs.subject()),
+            display::hex(tbs.serial_number().as_bytes())
+        ),
+    }
+}
+
 fn sign(args: &SignArgs) -> Result<bool> {
     let content = std::fs::read(&args.input).map_err(|e| format!("{}: {e}", args.input))?;
-    let env = args.crypto.cms_environment(args.crypto.pki_environment());
-    let credential = args
-        .crypto
-        .signing_credential(read_certificate(&args.cert)?, &read_der(&args.key)?)?;
+    let mut env = args.crypto.cms_environment(args.crypto.pki_environment()?);
+    let held = signer_credential(args, &mut env)?;
+    let credential = held.credential();
 
     let digest = args.digest.digest();
-    let mut signer = Signer::explicit(credential.as_ref()).digest(digest);
+    let mut signer = Signer::explicit(credential).digest(digest);
     if args.pss {
         signer = signer.signature_algorithm(rsa_pss(digest)?);
     }
@@ -479,7 +619,7 @@ fn verify(args: &VerifyArgs) -> Result<bool> {
 
     let vet = !args.anchor.is_empty() || args.store.is_some();
     let cps = trust::settings(args.settings.as_deref())?;
-    let mut pe = args.crypto.pki_environment();
+    let mut pe = args.crypto.pki_environment()?;
     if vet {
         trust::add_trust(
             &mut pe,
@@ -562,7 +702,9 @@ fn write_content(file: Option<&str>, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Bytes from hex digits, which may be separated by colons, as `display::hex` writes them.
 fn from_hex(hex: &str) -> Result<Vec<u8>> {
+    let hex = &hex.replace(':', "");
     if !hex.len().is_multiple_of(2) {
         return Err(format!("{hex}: an odd number of hex digits").into());
     }
@@ -572,6 +714,19 @@ fn from_hex(hex: &str) -> Result<Vec<u8>> {
             u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| format!("{hex}: not hex").into())
         })
         .collect()
+}
+
+fn recipient_identifier(rid: &RecipientIdentifier) -> String {
+    match rid {
+        RecipientIdentifier::IssuerAndSerialNumber(iasn) => format!(
+            "issuer {}, serial {}",
+            display::name(&iasn.issuer),
+            display::hex(iasn.serial_number.as_bytes())
+        ),
+        RecipientIdentifier::SubjectKeyIdentifier(skid) => {
+            format!("subject key identifier {}", display::hex(skid.0.as_bytes()))
+        }
+    }
 }
 
 fn signer_identifier(sid: &SignerIdentifier) -> String {

@@ -71,7 +71,7 @@ pub async fn run(args: &Args) -> Result<bool> {
     }
     let toi = cps.get_time_of_interest();
 
-    let mut pe = args.crypto.pki_environment();
+    let mut pe = args.crypto.pki_environment()?;
     let anchors_only = trust::add_trust(
         &mut pe,
         &cps,

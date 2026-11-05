@@ -23,17 +23,27 @@ default = []
 # OpenSSL as a --crypto choice, through certval-openssl, for certificate verification and CMS. Needs
 # the system's OpenSSL 3 to build, and is not offered on Windows.
 openssl = ["dep:certval-openssl"]
+# AWS-LC's FIPS module for --crypto aws-lc, in place of its ordinary build. Needs CMake and Go to
+# build.
+awslc-fips = ["certval-awslc/fips"]
+# CryptoKit for --crypto security-framework, on macOS: ML-KEM-768 and ML-KEM-1024 encryption and
+# decryption, and ML-DSA-65 and ML-DSA-87 verification. Needs Xcode's Swift toolchain with the 26
+# SDK to build, and macOS 26 to run; elsewhere it does nothing.
+cryptokit = ["certval-security-framework/pqc"]
 
 [dependencies]
 certval = { version = "0.2.0-rc.1", features = ["remote", "rsa", "pqc"] }
 certval-cms = { version = "0.1.0-rc.1", features = ["pqc"] }
+certval-awslc = { version = "0.1.0-rc.1", features = ["cms"] }
+certval-pkcs11 = { version = "0.1.0-rc.1", features = ["cms"] }
 certval_stores_core = "0.1.0-rc.1"
 certval_stores_fpki = "1.0.0-rc.1"
 certval_stores_webpki_root_certs = "1.0.0-rc.1"
 
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
 cms = "0.3.0-rc.0"
 const-oid = { version = "0.10.2", features = ["db"] }
+cryptoki = "0.12.0"
 der = { version = "0.8.3", features = ["alloc", "oid", "pem"] }
 getrandom = { version = "0.4.3", features = ["sys_rng"] }
 pem-rfc7468 = { version = "1.0.0", features = ["alloc"] }
@@ -44,17 +54,32 @@ spki = "0.8.1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 x509-cert = "0.3.0"
 
+[dev-dependencies]
+# The CMS tests put a key openssl made on a PKCS #11 token, which takes the private scalar.
+pkcs8 = "0.11.0"
+sec1 = "0.8.1"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.191"
 
 [target.'cfg(not(windows))'.dependencies]
 certval-openssl = { version = "0.1.0-rc.1", features = ["cms"], optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+certval-security-framework = { version = "0.1.0-rc.1", features = ["cms"] }
+
+[target.'cfg(windows)'.dependencies]
+certval-cng = { version = "0.1.0-rc.1", features = ["cms"] }
+
 [patch.crates-io]
-# certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so both come
-# from neighboring checkouts. Remove these once they publish.
+# certval-cms is not on crates.io yet, and the providers' cms features are not released, so these come
+# from neighboring checkouts. Remove them once they publish.
 certval-cms = { path = "../certval-cms" }
+certval-awslc = { path = "../certval-awslc" }
+certval-cng = { path = "../certval-cng" }
 certval-openssl = { path = "../certval-openssl" }
+certval-pkcs11 = { path = "../certval-pkcs11" }
+certval-security-framework = { path = "../certval-security-framework" }
 
 # Uncomment while developing certval and this crate together: it redirects the crates.io dependency
 # above to the local checkout, so edits take effect without a publish. Leave it commented on anything

@@ -96,9 +96,13 @@ signer CN=signer: signature verified, certificate validated
 an EnvelopedData for CBC. Each recipient's certificate decides its recipient type: key transport
 for an RSA key (`--key-transport`, RSAES-OAEP with SHA-256 by default), key agreement for an EC key
 and a KEM for an ML-KEM key (`--kdf`, `--wrap` and `--ukm`). `decrypt` takes the recipient's
-certificate and its PKCS #8 private key.
+certificate and its PKCS #8 private key, or without them, a key the `--crypto` implementation
+holds for a recipient the message names (see [Keys an implementation
+holds](#keys-an-implementation-holds)).
 
-`sign` signs with the PKCS #8 key for `--cert`, with `--digest`, and `--pss` for RSASSA-PSS. It
+`sign` signs with the PKCS #8 key for `--cert`, or without `--key`, with a key the `--crypto`
+implementation holds, for `--cert`, `--email` or `--skid`. It signs with `--digest`, and `--pss`
+for RSASSA-PSS. It
 adds the content-type, message-digest and signing-certificate-v2 attributes; `--no-ess-cert-id`
 leaves out the last. `--detached` leaves the content out, `--include none` leaves the signer's
 certificate out, and `--certfile` adds certificates such as intermediates. `verify` verifies each
@@ -125,18 +129,60 @@ verified**, and the output says so: certval verifies OCSP responses as part of c
 ## Choosing the cryptography
 
 `verify` and the `cms` commands take `--crypto`, which chooses the implementation that performs
-their cryptographic operations: `software`, certval's and certval-cms's RustCrypto software (the
-default), or `openssl`, the system's OpenSSL 3 through
-[certval-openssl](https://github.com/carl-wallace/certval-openssl). The choice is registered ahead
-of software, so software answers only what it declines; `--only` leaves software out, so that
-every operation reaches the chosen implementation or fails. The private key operations of
-`cms decrypt` and `cms sign` are performed by the chosen implementation either way.
+their cryptographic operations:
 
-`openssl` is offered by a build with the `openssl` feature, which needs OpenSSL 3 to build and is
-not available on Windows:
+| `--crypto` | Implementation | Offered |
+|---|---|---|
+| `software` | certval's and certval-cms's RustCrypto software (the default) | everywhere |
+| `openssl` | the system's OpenSSL 3, through [certval-openssl](https://github.com/carl-wallace/certval-openssl) | with the `openssl` feature, not on Windows |
+| `aws-lc` | AWS-LC, through [certval-awslc](https://github.com/carl-wallace/certval-awslc) | everywhere; its FIPS module with the `awslc-fips` feature |
+| `security-framework` | Security.framework, through [certval-security-framework](https://github.com/carl-wallace/certval-security-framework); with the `cryptokit` feature, CryptoKit for ML-KEM-768/1024 and ML-DSA-65/87 verification | macOS; `cryptokit` needs the 26 SDK to build and macOS 26 to run |
+| `cng` | CNG, through [certval-cng](https://github.com/carl-wallace/certval-cng) | Windows |
+| `pkcs11` | a PKCS #11 module, through [certval-pkcs11](https://github.com/carl-wallace/certval-pkcs11) | everywhere |
+
+The choice is registered ahead of software, so software answers only what it declines; `--only`
+leaves software out, so that every operation reaches the chosen implementation or fails. The private
+key operations of `cms decrypt` and `cms sign` are performed by the chosen implementation either
+way, so what its keys decline, such as ML-DSA signing by AWS-LC or Security.framework, fails with or
+without `--only`. A PKCS #8 `--key` is imported into the chosen implementation; PKCS #11 takes keys
+only from its token.
+
+`pkcs11` loads the module `--pkcs11-module` names and uses the token `--pkcs11-token` labels, or the
+first slot with a token present. It hashes and verifies through the module, and decrypts and signs
+with keys on the token after logging in with `--pkcs11-pin`; content encryption and the public key
+side of enveloping are software's. The three flags can be given as `CERTVAL_PKCS11_MODULE`,
+`CERTVAL_PKCS11_TOKEN_LABEL` and `CERTVAL_PKCS11_USER_PIN`, which keeps the PIN off the command
+line.
+
+`openssl` needs OpenSSL 3 to build, `awslc-fips` CMake and Go, and `cryptokit` Xcode's Swift
+toolchain with the 26 SDK:
 
 ```sh
 cargo install certval-cli --features openssl
+```
+
+### Keys an implementation holds
+
+`security-framework`, `cng` and `pkcs11` hold keys, each with its certificate: the keychain's
+identities, the current user's personal certificate store, and the token's certificates with the
+private keys of the same `CKA_ID`. `certval cred list` lists them, showing each certificate's
+subject, issuer, serial number, validity, public key, key usage, extended key usage, subject
+alternative names and subject key identifier:
+
+```sh
+certval cred list --crypto security-framework
+certval cred list --crypto pkcs11 --pkcs11-module /usr/lib/softhsm/libsofthsm2.so
+```
+
+Without `--key`, `cms decrypt` decrypts with the key the implementation holds for the first
+recipient the message names that it holds one for, and `cms sign` signs with the key for `--cert`,
+for a certificate containing `--email`, or for the subject key identifier `--skid`, as `cred list`
+shows it. The key must be the only one that matches and permits signing; when several do, `sign`
+lists them so that one can be chosen with `--skid`.
+
+```sh
+certval cms decrypt --in message.der --crypto security-framework
+certval cms sign --in message.txt --email alice@example.com --out signed.der --crypto cng
 ```
 
 ## Exit codes
@@ -164,7 +210,8 @@ CERTVAL_CLI_EXAMPLES=../rust-pki/certval/tests/examples cargo test
 
 The CMS tests run the binary against `openssl cms` in both directions, under each `--crypto`
 choice with `--only`: what openssl encrypts or signs, `certval cms` decrypts or verifies, and the
-reverse, with RSA, EC, ML-KEM and ML-DSA keys from a CA they make with openssl.
+reverse, with RSA, EC, ML-KEM and ML-DSA keys from a CA they make with openssl. A case a choice
+declines is run to see it fail with `--only`, then without, unless its key performs it.
 `CERTVAL_CMS_OPENSSL` names the `openssl` command; when it is unset they say so and pass. ML-KEM
 and ML-DSA need OpenSSL 3.5 or later, and ML-KEM in CMS 3.6; with an older openssl those cases
 are skipped and say so.
@@ -173,10 +220,17 @@ are skipped and say so.
 CERTVAL_CMS_OPENSSL=$(command -v openssl) cargo test --features openssl -- --nocapture
 ```
 
-certval-cms is not on crates.io yet, and certval-openssl's `cms` feature is not released, so
-`Cargo.toml`'s `[patch.crates-io]` takes both from neighboring checkouts (`../certval-cms`,
-`../certval-openssl`), and CI checks them out there. Both go when they publish, and this crate
-cannot publish before they do.
+One CMS test puts an EC key and its certificate on a PKCS #11 token, as token objects it removes
+afterwards, then lists, signs with and decrypts with it through `--crypto pkcs11`. It reads
+`CERTVAL_PKCS11_MODULE`, `CERTVAL_PKCS11_TOKEN_LABEL` and `CERTVAL_PKCS11_USER_PIN`, as
+certval-pkcs11's tests do; with the module or PIN unset it says so and passes. CI runs it on
+SoftHSM.
+
+certval-cms is not on crates.io yet, and the providers' `cms` features are not released, so
+`Cargo.toml`'s `[patch.crates-io]` takes them from neighboring checkouts (`../certval-cms`,
+`../certval-awslc`, `../certval-cng`, `../certval-openssl`, `../certval-pkcs11`,
+`../certval-security-framework`), and CI checks them out there. They go when they publish, and this
+crate cannot publish before they do.
 
 ## License
 

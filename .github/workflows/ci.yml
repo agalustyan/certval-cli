@@ -36,21 +36,40 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: certval-cli
-      # certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so
-      # Cargo.toml's [patch.crates-io] takes both from neighboring checkouts, which these are. They
-      # go once both publish.
+      # certval-cms is not on crates.io yet, and the providers' cms features are not released, so
+      # Cargo.toml's [patch.crates-io] takes them from neighboring checkouts, which these are. Every
+      # one is needed on every platform, since cargo loads each patch. They go once all publish.
       - uses: actions/checkout@v7
         with:
           repository: carl-wallace/certval-cms
           path: certval-cms
       - uses: actions/checkout@v7
         with:
+          repository: carl-wallace/certval-awslc
+          path: certval-awslc
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-cng
+          path: certval-cng
+      - uses: actions/checkout@v7
+        with:
           repository: carl-wallace/certval-openssl
           path: certval-openssl
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-pkcs11
+          path: certval-pkcs11
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-security-framework
+          path: certval-security-framework
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
       - run: cargo build --all-targets
+      # cryptokit compiles certval-security-framework's Swift shim, which needs the macOS 26 SDK.
+      - if: runner.os == 'macOS'
+        run: cargo build --all-targets --features cryptokit
       # The openssl feature links the system's OpenSSL 3, which the Ubuntu image provides as a
       # package; it is built on Linux only.
       - if: runner.os == 'Linux'
@@ -68,17 +87,33 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: certval-cli
-      # certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so
-      # Cargo.toml's [patch.crates-io] takes both from neighboring checkouts, which these are. They
-      # go once both publish.
+      # certval-cms is not on crates.io yet, and the providers' cms features are not released, so
+      # Cargo.toml's [patch.crates-io] takes them from neighboring checkouts, which these are. Every
+      # one is needed on every platform, since cargo loads each patch. They go once all publish.
       - uses: actions/checkout@v7
         with:
           repository: carl-wallace/certval-cms
           path: certval-cms
       - uses: actions/checkout@v7
         with:
+          repository: carl-wallace/certval-awslc
+          path: certval-awslc
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-cng
+          path: certval-cng
+      - uses: actions/checkout@v7
+        with:
           repository: carl-wallace/certval-openssl
           path: certval-openssl
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-pkcs11
+          path: certval-pkcs11
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-security-framework
+          path: certval-security-framework
       - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -107,17 +142,33 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: certval-cli
-      # certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so
-      # Cargo.toml's [patch.crates-io] takes both from neighboring checkouts, which these are. They
-      # go once both publish.
+      # certval-cms is not on crates.io yet, and the providers' cms features are not released, so
+      # Cargo.toml's [patch.crates-io] takes them from neighboring checkouts, which these are. Every
+      # one is needed on every platform, since cargo loads each patch. They go once all publish.
       - uses: actions/checkout@v7
         with:
           repository: carl-wallace/certval-cms
           path: certval-cms
       - uses: actions/checkout@v7
         with:
+          repository: carl-wallace/certval-awslc
+          path: certval-awslc
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-cng
+          path: certval-cng
+      - uses: actions/checkout@v7
+        with:
           repository: carl-wallace/certval-openssl
           path: certval-openssl
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-pkcs11
+          path: certval-pkcs11
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-security-framework
+          path: certval-security-framework
       - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       # The example files the tests run the binary against live in rust-pki's test data and are
       # pointed at rather than copied. Pinned to the commit the certval release in Cargo.toml was
@@ -128,12 +179,25 @@ jobs:
           ref: 93104f49a8083f1e527e3b4e830581b917674e2f
           path: rust-pki
       - uses: dtolnay/rust-toolchain@stable
+      # A token for the CMS test of keys an implementation holds, as certval-pkcs11's CI makes one.
+      - name: Install and initialize SoftHSM
+        run: |
+          sudo apt-get install -y softhsm2
+          mkdir -p "$HOME/softhsm/tokens"
+          printf 'directories.tokendir = %s\nobjectstore.backend = file\nlog.level = ERROR\n' \
+            "$HOME/softhsm/tokens" > "$HOME/softhsm/softhsm2.conf"
+          echo "SOFTHSM2_CONF=$HOME/softhsm/softhsm2.conf" >> "$GITHUB_ENV"
+          SOFTHSM2_CONF="$HOME/softhsm/softhsm2.conf" softhsm2-util \
+            --init-token --slot 0 --label certval --so-pin 1234 --pin 1234
       # The CMS tests run against the runner's openssl, 3.0, which offers no ML-KEM or ML-DSA, so
       # those cases skip here; test-openssl-3-6 runs them.
       - name: Run the unit, command and CMS tests
         env:
           CERTVAL_CLI_EXAMPLES: ${{ github.workspace }}/rust-pki/certval/tests/examples
           CERTVAL_CMS_OPENSSL: openssl
+          CERTVAL_PKCS11_MODULE: /usr/lib/softhsm/libsofthsm2.so
+          CERTVAL_PKCS11_TOKEN_LABEL: certval
+          CERTVAL_PKCS11_USER_PIN: "1234"
         run: cargo test --features openssl -- --nocapture
 
   # The CMS tests against an OpenSSL 3.6 built from source, both as the openssl command they run
@@ -148,17 +212,33 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: certval-cli
-      # certval-cms is not on crates.io yet, and certval-openssl's cms feature is not released, so
-      # Cargo.toml's [patch.crates-io] takes both from neighboring checkouts, which these are. They
-      # go once both publish.
+      # certval-cms is not on crates.io yet, and the providers' cms features are not released, so
+      # Cargo.toml's [patch.crates-io] takes them from neighboring checkouts, which these are. Every
+      # one is needed on every platform, since cargo loads each patch. They go once all publish.
       - uses: actions/checkout@v7
         with:
           repository: carl-wallace/certval-cms
           path: certval-cms
       - uses: actions/checkout@v7
         with:
+          repository: carl-wallace/certval-awslc
+          path: certval-awslc
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-cng
+          path: certval-cng
+      - uses: actions/checkout@v7
+        with:
           repository: carl-wallace/certval-openssl
           path: certval-openssl
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-pkcs11
+          path: certval-pkcs11
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/certval-security-framework
+          path: certval-security-framework
       - run: sudo apt-get update && sudo apt-get install -y pkg-config
       - uses: dtolnay/rust-toolchain@stable
 
@@ -189,7 +269,9 @@ jobs:
           CERTVAL_CMS_OPENSSL: /home/runner/openssl/bin/openssl
         run: |
           set -o pipefail
-          cargo test --features openssl --test cms -- --nocapture 2>&1 | tee "$RUNNER_TEMP/test.log"
+          # The token test is the test job's; it runs no openssl case this job adds.
+          cargo test --features openssl --test cms -- --nocapture \
+            --skip a_key_on_a_token_is_listed_signs_and_decrypts 2>&1 | tee "$RUNNER_TEMP/test.log"
           if grep -n 'skipped' "$RUNNER_TEMP/test.log"; then
             echo "a CMS case was skipped; this job exists to run them all"
             exit 1
