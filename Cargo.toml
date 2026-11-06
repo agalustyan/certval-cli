@@ -32,7 +32,7 @@ awslc-fips = ["certval-awslc/fips"]
 cryptokit = ["certval-security-framework/pqc"]
 
 [dependencies]
-certval = { version = "0.2.0-rc.1", features = ["remote", "rsa", "pqc"] }
+certval = { version = "0.2.0-rc.2", features = ["remote", "rsa", "pqc"] }
 certval-cms = { version = "0.1.0-rc.1", features = ["pqc"] }
 certval-awslc = { version = "0.1.0-rc.1", features = ["cms"] }
 certval-pkcs11 = { version = "0.1.0-rc.1", features = ["cms"] }
