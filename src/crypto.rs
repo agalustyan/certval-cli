@@ -267,11 +267,7 @@ impl CryptoArgs {
             #[cfg(target_os = "macos")]
             Crypto::SecurityFramework => security_framework_key(pkcs8)?,
             #[cfg(windows)]
-            Crypto::Cng => {
-                return Err(
-                    "--crypto cng does not yet sign with a key that has no certificate".into(),
-                )
-            }
+            Crypto::Cng => Box::new(certval_cng::import_pkcs8_key(pkcs8)?),
             Crypto::Pkcs11 => {
                 return Err(
                     "--crypto pkcs11 does not yet sign with a key that has no certificate".into(),
