@@ -160,8 +160,21 @@ responder's certificate. The responder is the CA, or a certificate the CA issued
 id-kp-OCSPSigning.
 
 Certificates and CRLs are written as DER, or with `--outform pem`, PEM; OCSP responses as DER.
-Creating requests and self-signed certificates (`req`) is not here yet: a key that has no
-certificate yet is not something an implementation hands out.
+
+### `certval req` makes a certificate request or a self-signed certificate
+
+```sh
+certval req --key alice.key --subject "CN=Alice" --san-email alice@example.com --out alice.csr
+certval req --key root.key --subject "CN=Test Root" --x509 --ca --days 3650 --out root.crt
+```
+
+Signs with a key that has no certificate yet: a PKCS #8 key, taken into the `--crypto`
+implementation as one, under software, OpenSSL, AWS-LC, or Security.framework, which with the
+`cryptokit` feature holds an ML-DSA key in CryptoKit. CNG and PKCS #11 do not offer such keys yet.
+A request asks for the extensions `--ca`, `--key-usage`, `--eku`, `--san-email` and `--san-dns`
+choose, as `openssl req -addext` does; with `--x509`, a self-signed certificate contains them, with
+`--days` and `--serial` as for `ca issue`. A key that cannot sign, such as an ML-KEM key, has no
+request: `ca issue --public-key` certifies it.
 
 ## Choosing the cryptography
 
@@ -232,9 +245,9 @@ certval cms sign --in message.txt --email alice@example.com --out signed.der --c
 
 ## Not yet
 
-`req` (certificate requests and self-signed certificates), `pkcs12` and `ts` are not here yet.
-`req` needs keys that have no certificate yet, which the implementations do not offer; `pkcs12`
-waits on a PKCS #12 builder on crates.io; and `ts` on certval's move to cms `0.3.0-rc.1`.
+`pkcs12` and `ts` are not here yet: `pkcs12` waits on a PKCS #12 builder on crates.io, and `ts` on
+certval's move to cms `0.3.0-rc.1`. `req` under `--crypto cng` and `pkcs11` waits on those
+implementations offering keys that have no certificate.
 
 ## Testing
 
@@ -271,7 +284,8 @@ SoftHSM.
 
 `scripts/openssl-interop.sh` runs a wider matrix against openssl than the tests do, and prints it:
 every RSA, EC, ML-KEM and ML-DSA parameter set, each key transport, KDF, key wrap and content
-algorithm, and for `ca`, a CA of each signing key type and a delegated OCSP responder, under every
+algorithm, for `ca`, a CA of each signing key type and a delegated OCSP responder, and for `req`,
+a request and a self-signed certificate from each signing key, under every
 `--crypto` choice, PKCS #11 included when a module is named. Each cell says whether the choice did
 the case alone (`ok`), with software's help (`sw`), declined it (`no`), or failed. It is not part
 of `cargo test`; `-h` gives its options.

@@ -24,6 +24,9 @@ an increase to the minimum supported Rust version is not treated as a breaking c
 - `ca issue`, `ca crl` and `ca ocsp` issue certificates (from a request or a public key), sign
   CRLs and answer OCSP requests with a CA's key, as a file or held by the `--crypto`
   implementation, through certval-cms's `CredentialSigner`.
+- `req` makes a certificate request, or with `--x509` a self-signed certificate, with a PKCS #8 key
+  taken into the `--crypto` implementation as a key with no certificate (certval-cms's `SigningKey`):
+  software, OpenSSL, AWS-LC and Security.framework, with CryptoKit for ML-DSA.
 
 ## [0.1.0-rc.1] - 2026-10-31
 

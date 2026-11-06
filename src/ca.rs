@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime};
 
 use certval_cms::{
     rsa_pss, CmsEnvironment, CredentialSignature, CredentialSigner, SharedSigningCredential,
-    SigningCredential, SigningCredentialLookup,
+    SigningCredential, SigningCredentialLookup, SigningKey,
 };
 use clap::ValueEnum;
 use cms::cert::IssuerAndSerialNumber;
@@ -274,6 +274,21 @@ pub struct IssueArgs {
     #[arg(long, value_name = "FILE")]
     pub out: String,
 
+    #[command(flatten)]
+    pub content: ContentArgs,
+
+    /// Encoding of the certificate written
+    #[arg(long, value_enum, default_value_t = Form::Der)]
+    pub outform: Form,
+
+    #[command(flatten)]
+    pub signing: SigningArgs,
+}
+
+/// What a certificate contains besides its subject, key and key identifiers: shared by `ca issue`
+/// and `req`, whose request asks for the same extensions.
+#[derive(clap::Args)]
+pub struct ContentArgs {
     /// Days the certificate is valid for, from now
     #[arg(long, default_value_t = 365)]
     pub days: u64,
@@ -307,13 +322,90 @@ pub struct IssueArgs {
     /// A DNS name for the subject alternative name; repeatable
     #[arg(long, value_name = "NAME")]
     pub san_dns: Vec<String>,
+}
 
-    /// Encoding of the certificate written
-    #[arg(long, value_enum, default_value_t = Form::Der)]
-    pub outform: Form,
+impl ContentArgs {
+    /// The extensions these arguments choose, for a subject named `subject`, with `requested`
+    /// subject alternative names besides those given here. Not the key identifiers, which depend on
+    /// the keys.
+    pub(crate) fn extensions(
+        &self,
+        subject: &Name,
+        requested: Vec<GeneralName>,
+    ) -> Result<Vec<Extension>> {
+        let mut extensions = vec![];
+        if self.ca {
+            extensions.push(extension(
+                ID_CE_BASIC_CONSTRAINTS,
+                true,
+                &BasicConstraints {
+                    ca: true,
+                    path_len_constraint: self.path_len,
+                },
+            )?);
+        }
+        let usages: Vec<Usage> = if self.key_usage.is_empty() && self.ca {
+            vec![Usage::KeyCertSign, Usage::CrlSign]
+        } else {
+            self.key_usage.clone()
+        };
+        if !usages.is_empty() {
+            let flags = usages
+                .iter()
+                .fold(der::flagset::FlagSet::<KeyUsages>::default(), |f, u| {
+                    f | KeyUsages::from(*u)
+                });
+            extensions.push(extension(ID_CE_KEY_USAGE, true, &KeyUsage(flags))?);
+        }
+        if !self.eku.is_empty() {
+            let purposes = ExtendedKeyUsage(self.eku.iter().map(|p| (*p).into()).collect());
+            extensions.push(extension(ID_CE_EXT_KEY_USAGE, false, &purposes)?);
+        }
+        let mut names = requested;
+        for email in &self.san_email {
+            names.push(GeneralName::Rfc822Name(Ia5String::new(email)?));
+        }
+        for dns in &self.san_dns {
+            names.push(GeneralName::DnsName(Ia5String::new(dns)?));
+        }
+        if !names.is_empty() {
+            // RFC 5280, section 4.2.1.6: critical when the subject name is empty.
+            extensions.push(extension(
+                ID_CE_SUBJECT_ALT_NAME,
+                subject.is_empty(),
+                &SubjectAltName(names),
+            )?);
+        } else if subject.is_empty() {
+            return Err("a certificate needs a subject name or a subject alternative name".into());
+        }
+        Ok(extensions)
+    }
 
-    #[command(flatten)]
-    pub signing: SigningArgs,
+    /// Signs a certificate for `spki`, named `subject`, under `issuer`, whose key identifier is
+    /// `authority_key_identifier`, with these arguments' extensions, serial number and validity.
+    pub(crate) fn certificate<K: SigningKey + ?Sized>(
+        &self,
+        signer: &CredentialSigner<'_, K>,
+        issuer: Name,
+        authority_key_identifier: OctetString,
+        subject: Name,
+        spki: SubjectPublicKeyInfoOwned,
+        requested: Vec<GeneralName>,
+    ) -> Result<Certificate> {
+        let profile = Profile {
+            extensions: self.extensions(&subject, requested)?,
+            issuer,
+            subject,
+            authority_key_identifier,
+        };
+        let serial = match &self.serial {
+            Some(hex) => SerialNumber::new(&from_hex(hex)?)?,
+            None => random_serial()?,
+        };
+        let validity = Validity::from_now(Duration::from_secs(self.days * 86400))?;
+        Ok(CertificateBuilder::new(profile, serial, validity, spki)?
+            .build::<_, CredentialSignature>(signer)?)
+    }
 }
 
 /// The subject's name and public key, and the subject alternative names requested.
@@ -428,67 +520,15 @@ fn issue(args: &IssueArgs) -> Result<bool> {
             .map_err(|e| format!("{name}: not a name: {e}"))?;
     }
 
-    let mut extensions = vec![];
-    if args.ca {
-        extensions.push(extension(
-            ID_CE_BASIC_CONSTRAINTS,
-            true,
-            &BasicConstraints {
-                ca: true,
-                path_len_constraint: args.path_len,
-            },
-        )?);
-    }
-    let usages: Vec<Usage> = if args.key_usage.is_empty() && args.ca {
-        vec![Usage::KeyCertSign, Usage::CrlSign]
-    } else {
-        args.key_usage.clone()
-    };
-    if !usages.is_empty() {
-        let flags = usages
-            .iter()
-            .fold(der::flagset::FlagSet::<KeyUsages>::default(), |f, u| {
-                f | KeyUsages::from(*u)
-            });
-        extensions.push(extension(ID_CE_KEY_USAGE, true, &KeyUsage(flags))?);
-    }
-    if !args.eku.is_empty() {
-        let purposes = ExtendedKeyUsage(args.eku.iter().map(|p| (*p).into()).collect());
-        extensions.push(extension(ID_CE_EXT_KEY_USAGE, false, &purposes)?);
-    }
-    let mut names = subject.requested_names;
-    for email in &args.san_email {
-        names.push(GeneralName::Rfc822Name(Ia5String::new(email)?));
-    }
-    for dns in &args.san_dns {
-        names.push(GeneralName::DnsName(Ia5String::new(dns)?));
-    }
-    if !names.is_empty() {
-        // RFC 5280, section 4.2.1.6: critical when the subject name is empty.
-        let critical = subject.name.is_empty();
-        extensions.push(extension(
-            ID_CE_SUBJECT_ALT_NAME,
-            critical,
-            &SubjectAltName(names),
-        )?);
-    } else if subject.name.is_empty() {
-        return Err("a certificate needs a subject name or a subject alternative name".into());
-    }
-
-    let profile = Profile {
-        issuer: ca.tbs_certificate().subject().clone(),
-        subject: subject.name,
-        authority_key_identifier: key_identifier(ca)?,
-        extensions,
-    };
-    let serial = match &args.serial {
-        Some(hex) => SerialNumber::new(&from_hex(hex)?)?,
-        None => random_serial()?,
-    };
-    let validity = Validity::from_now(Duration::from_secs(args.days * 86400))?;
     let signer = signing.signer(&env, credential)?;
-    let certificate = CertificateBuilder::new(profile, serial, validity, subject.spki)?
-        .build::<_, CredentialSignature>(&signer)?;
+    let certificate = args.content.certificate(
+        &signer,
+        ca.tbs_certificate().subject().clone(),
+        key_identifier(ca)?,
+        subject.name,
+        subject.spki,
+        subject.requested_names,
+    )?;
     write(
         &args.out,
         &certificate.to_der()?,
@@ -717,7 +757,11 @@ fn ocsp(args: &OcspArgs) -> Result<bool> {
 
 // ---- shared
 
-fn extension(oid: ObjectIdentifier, critical: bool, value: &impl Encode) -> der::Result<Extension> {
+pub(crate) fn extension(
+    oid: ObjectIdentifier,
+    critical: bool,
+    value: &impl Encode,
+) -> der::Result<Extension> {
     Ok(Extension {
         extn_id: oid,
         critical,
@@ -767,7 +811,7 @@ fn random_serial() -> Result<SerialNumber> {
     Ok(SerialNumber::new(&bytes)?)
 }
 
-fn write(file: &str, der: &[u8], form: Form, label: &str) -> Result<()> {
+pub(crate) fn write(file: &str, der: &[u8], form: Form, label: &str) -> Result<()> {
     let bytes = match form {
         Form::Der => der.to_vec(),
         Form::Pem => pem_rfc7468::encode_string(label, pem_rfc7468::LineEnding::LF, der)

@@ -21,6 +21,9 @@
 #   ocsp     certval ca ocsp answers an openssl request (with a nonce) about a serial number it
 #            reports revoked, openssl verifies the response against the saved request; from the
 #            same CAs, and from a delegated responder of the P-256 CA
+#   req      certval req signs a certificate request, which openssl req -verify accepts, and with
+#            --x509 a self-signed certificate, which openssl verify accepts: each RSA, EC and ML-DSA
+#            key, RSA also with PSS. pkcs11 is n/a: req takes no key on a token yet
 #
 # A test CA and keys are made with openssl in WORKDIR. ML-DSA needs openssl 3.5, and ML-KEM in CMS
 # 3.6; with an older openssl those cases are left out and the summary says so. One case is expected
@@ -43,7 +46,7 @@
 #
 # Usage:
 #   scripts/openssl-interop.sh [-c CERTVAL] [-s OPENSSL] [-w WORKDIR] [--crypto LIST]
-#                              [--ops decrypt,encrypt,sign,verify,issue,crl,ocsp]
+#                              [--ops decrypt,encrypt,sign,verify,issue,crl,ocsp,req]
 #                              [--pkcs11-module FILE] [--pkcs11-token LABEL] [--pkcs11-pin PIN]
 #                              [--log FILE]
 #
@@ -55,7 +58,7 @@
 #   --crypto LIST     the --crypto choices to run; defaults to every one the binary offers, without
 #                     pkcs11 when no module is named
 #   --ops LIST        run only these operations; issue, crl and ocsp are left out of the default
-#                     when the certval binary has no `ca` command
+#                     when the certval binary has no `ca` command, and req when it has no `req`
 #   --pkcs11-module, --pkcs11-token, --pkcs11-pin
 #                     the module, token label and user PIN for pkcs11; default to
 #                     $CERTVAL_PKCS11_MODULE, $CERTVAL_PKCS11_TOKEN_LABEL and
@@ -154,12 +157,18 @@ BACKENDS=$(printf '%s\n' "$CRYPTOS" | tr ',' ' ')
 # issue, crl and ocsp need `certval ca`, which older binaries do not have.
 HAS_CA=0
 "$CERTVAL" ca -h >/dev/null 2>&1 && HAS_CA=1
+HAS_REQ=0
+"$CERTVAL" req -h >/dev/null 2>&1 && HAS_REQ=1
 if [ -z "$OPS" ]; then
     OPS=decrypt,encrypt,sign,verify
     if [ "$HAS_CA" = 1 ]; then OPS=$OPS,issue,crl,ocsp; else echo "certval has no ca command: issue, crl and ocsp left out"; fi
+    if [ "$HAS_REQ" = 1 ]; then OPS=$OPS,req; else echo "certval has no req command: req left out"; fi
 fi
 case ",$OPS," in
     *,issue,*|*,crl,*|*,ocsp,*) [ "$HAS_CA" = 1 ] || { echo "$CERTVAL has no ca command for issue, crl or ocsp" >&2; exit 2; } ;;
+esac
+case ",$OPS," in
+    *,req,*) [ "$HAS_REQ" = 1 ] || { echo "$CERTVAL has no req command" >&2; exit 2; } ;;
 esac
 
 wanted() { case ",$OPS," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
@@ -754,6 +763,49 @@ if wanted ocsp; then
         ocsp_case "ca-$k $(ca_digest "$k")" "$k" "ca-$k"
     done
     ocsp_case "delegated responder of ca-p256" p256 responder
+fi
+
+# ---- req: certval req signs a request or a self-signed certificate, openssl verifies
+
+openssl_verifies_request() {
+    local out
+    if ! out=$(ossl req -in "$WORK/req.csr" -noout -verify 2>&1); then
+        CHECK_MSG="openssl req -verify: $out"; return 1
+    fi
+}
+openssl_verifies_self_signed() {
+    local out
+    if ! out=$(ossl verify -CAfile "$WORK/self.crt" "$WORK/self.crt" 2>&1); then
+        CHECK_MSG="openssl verify: $out"; return 1
+    fi
+}
+
+# req_case CASE KEY CHECK OUT CERTVAL_ARGS...: req with KEY's PKCS #8 file, writing OUT.
+req_case() {
+    CASE=$1; local key=$2 check=$3 out=$4 b
+    logcase "$OP  $CASE"
+    shift 4
+    for b in $BACKENDS; do
+        # req takes a key file into the implementation; a token's keys are not files.
+        if [ "$b" = pkcs11 ]; then record "$b" n/a; continue; fi
+        attempt "$b" ok "$check" req --key "$PKI/$key.key" --subject "CN=certval req $key" \
+            --out "$WORK/$out" --outform pem "$@"
+    done
+}
+
+if wanted req; then
+    OP=req
+    echo "== req (certval req signs, openssl verifies)"
+    for k in $CA_KEYS; do
+        d=$(ca_digest "$k")
+        req_case "$k request $d" "$k" openssl_verifies_request req.csr --digest "$d" \
+            --san-email "$k@example.com"
+        req_case "$k self-signed $d" "$k" openssl_verifies_self_signed self.crt --digest "$d" \
+            --x509 --ca --days 1
+    done
+    for k in $RSA_KEYS; do
+        req_case "$k request pss sha256" "$k" openssl_verifies_request req.csr --digest sha256 --pss
+    done
 fi
 
 # ---- the matrix
