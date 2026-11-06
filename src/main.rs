@@ -5,6 +5,7 @@
 //! The command names follow openssl's; the flags do not.
 
 mod asn1parse;
+mod ca;
 mod cms;
 mod cred;
 mod crl;
@@ -25,7 +26,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 #[command(
     name = "certval",
     version,
-    about = "Inspect X.509 certificates, CRLs, OCSP responses and DER, and validate certification paths"
+    about = "Inspect X.509 certificates, CRLs, OCSP responses and DER, validate certification paths, and issue test certificates, CRLs and OCSP responses"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -50,6 +51,9 @@ enum Command {
     /// List the keys the keychain, the certificate store or a PKCS #11 token holds
     #[command(subcommand)]
     Cred(cred::Command),
+    /// Issue certificates, sign CRLs and answer OCSP requests with a CA's key
+    #[command(subcommand)]
+    Ca(ca::Command),
 }
 
 /// Restores the default action for SIGPIPE, which Rust programs otherwise ignore, so that output
@@ -92,6 +96,7 @@ async fn run(cli: Cli) -> ExitCode {
         Command::Ocsp(args) => ocsp::run(&args).await.map(|()| true),
         Command::Cms(command) => cms::run(&command),
         Command::Cred(command) => cred::run(&command),
+        Command::Ca(command) => ca::run(&command),
     };
     match outcome {
         Ok(true) => ExitCode::SUCCESS,

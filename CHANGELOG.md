@@ -21,6 +21,9 @@ an increase to the minimum supported Rust version is not treated as a breaking c
 - `cred list` lists the keys the keychain, the current user's certificate store or a PKCS #11 token
   holds, and without `--key`, `cms decrypt` and `cms sign` use them: decrypting by the message's
   recipient identifiers, and signing with the key chosen by `--cert`, `--email` or `--skid`.
+- `ca issue`, `ca crl` and `ca ocsp` issue certificates (from a request or a public key), sign
+  CRLs and answer OCSP requests with a CA's key, as a file or held by the `--crypto`
+  implementation, through certval-cms's `CredentialSigner`.
 
 ## [0.1.0-rc.1] - 2026-10-31
 
