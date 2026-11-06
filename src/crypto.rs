@@ -197,6 +197,7 @@ impl CryptoArgs {
                 env.add_decrypt_content_callback(CngCrypto::new());
                 env.add_encrypt_key_transport_callback(CngCrypto::new());
                 env.add_encrypt_key_agreement_callback(CngCrypto::new());
+                env.add_encrypt_kem_callback(CngCrypto::new());
             }
         }
         if self.software() {

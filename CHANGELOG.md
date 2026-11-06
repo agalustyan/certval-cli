@@ -29,7 +29,8 @@ an increase to the minimum supported Rust version is not treated as a breaking c
   software, OpenSSL, AWS-LC and Security.framework, with CryptoKit for ML-DSA, and CNG for RSA and
   EC keys, and ML-DSA keys where Windows' CNG has ML-DSA.
 - `--crypto cng` signs and verifies ML-DSA-44, -65 and -87 where Windows' CNG has ML-DSA, through
-  certval-cng: `cms sign`, `cms verify`, `verify`, `ca` and `req`.
+  certval-cng: `cms sign`, `cms verify`, `verify`, `ca` and `req`. It encrypts to and decrypts for
+  ML-KEM-512, -768 and -1024 recipients where CNG has ML-KEM.
 
 ## [0.1.0-rc.1] - 2026-10-31
 

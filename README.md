@@ -188,7 +188,7 @@ their cryptographic operations:
 | `openssl` | the system's OpenSSL 3, through [certval-openssl](https://github.com/carl-wallace/certval-openssl) | with the `openssl` feature, not on Windows |
 | `aws-lc` | AWS-LC, through [certval-awslc](https://github.com/carl-wallace/certval-awslc) | everywhere; its FIPS module with the `awslc-fips` feature |
 | `security-framework` | Security.framework, through [certval-security-framework](https://github.com/carl-wallace/certval-security-framework); with the `cryptokit` feature, CryptoKit for ML-KEM-768/1024 and ML-DSA-65/87 signing and verification | macOS; `cryptokit` needs the 26 SDK to build and macOS 26 to run |
-| `cng` | CNG, through [certval-cng](https://github.com/carl-wallace/certval-cng); ML-DSA-44/65/87 signing and verification where Windows' CNG has ML-DSA | Windows |
+| `cng` | CNG, through [certval-cng](https://github.com/carl-wallace/certval-cng); ML-DSA-44/65/87 signing and verification, and ML-KEM-512/768/1024 encryption and decryption, where Windows' CNG has them | Windows |
 | `pkcs11` | a PKCS #11 module, through [certval-pkcs11](https://github.com/carl-wallace/certval-pkcs11) | everywhere |
 
 The choice is registered ahead of software, so software answers only what it declines; `--only`
