@@ -126,6 +126,43 @@ update, and with `--nonce` whether the nonce was echoed. **The response's signat
 verified**, and the output says so: certval verifies OCSP responses as part of checking a path.
 `certval verify --check-revocation` is the command that does that.
 
+### `certval ca` issues certificates, signs CRLs and answers OCSP requests
+
+```sh
+certval ca issue --csr alice.csr --cert ca.crt --key ca.key --eku email-protection --out alice.crt
+certval ca issue --public-key kem.pub --subject "CN=Bob" --san-email bob@example.com \
+    --key-usage key-encipherment --cert ca.crt --key ca.key --out bob.crt
+certval ca issue --csr sub.csr --ca --path-len 0 --cert ca.crt --key ca.key --out sub.crt
+certval ca crl --crl-number 2 --revoke 65:09:70:E1 --cert ca.crt --key ca.key --out ca.crl
+certval ca ocsp --request req.der --issuer ca.crt --revoke 65:09:70:E1 \
+    --cert ca.crt --key ca.key --out resp.der
+```
+
+For making test material with any implementation's keys: the CA's key is a PKCS #8 file, or
+without `--key`, a key the `--crypto` implementation holds for `--cert` or `--skid` (see [Keys an
+implementation holds](#keys-an-implementation-holds)), and it signs with `--digest`, or `--pss`
+for RSASSA-PSS. `issue` needs a CA certificate whose key usage, if it has one, permits
+keyCertSign; `crl`, cRLSign.
+
+`issue` certifies the subject and key of a PKCS #10 request (`--csr`), whose signature it checks
+and whose requested subject alternative names it copies, or a public key alone (`--public-key`,
+with `--subject`), e.g. an ML-KEM key, which cannot sign a request. It adds subject and authority
+key identifiers, and `--key-usage`, `--eku`, `--san-email` and `--san-dns`; `--ca` makes a CA
+certificate (basic constraints, and keyCertSign and cRLSign unless `--key-usage` says otherwise).
+The serial number is 16 random octets unless `--serial` gives one, and the certificate is valid
+for `--days` (365) from now. Nothing else a request asks for is copied.
+
+`crl` lists the `--revoke` serial numbers, with the CRL number and an authority key identifier
+naming the CA's key, and a next update `--next-update-days` (7) away. `ocsp` answers each
+certificate a request asks about: revoked when `--revoke` names it, good otherwise, and unknown for
+a certificate of a CA other than `--issuer`. It echoes the request's nonce and includes the
+responder's certificate. The responder is the CA, or a certificate the CA issued containing
+id-kp-OCSPSigning.
+
+Certificates and CRLs are written as DER, or with `--outform pem`, PEM; OCSP responses as DER.
+Creating requests and self-signed certificates (`req`) is not here yet: a key that has no
+certificate yet is not something an implementation hands out.
+
 ## Choosing the cryptography
 
 `verify` and the `cms` commands take `--crypto`, which chooses the implementation that performs
@@ -195,9 +232,9 @@ certval cms sign --in message.txt --email alice@example.com --out signed.der --c
 
 ## Not yet
 
-The commands that create things (`req`, `x509 -req`, `ca`, `pkcs12`, `ts`) are not here yet.
-Their building blocks exist, but several depend on crates that have no compatible crates.io release,
-and a published crate cannot depend on git.
+`req` (certificate requests and self-signed certificates), `pkcs12` and `ts` are not here yet.
+`req` needs keys that have no certificate yet, which the implementations do not offer; `pkcs12`
+waits on a PKCS #12 builder on crates.io; and `ts` on certval's move to cms `0.3.0-rc.1`.
 
 ## Testing
 
@@ -220,11 +257,29 @@ are skipped and say so.
 CERTVAL_CMS_OPENSSL=$(command -v openssl) cargo test --features openssl -- --nocapture
 ```
 
+The `ca` tests use the same openssl. Under each `--crypto` choice with `--only`, a P-256 CA and,
+with OpenSSL 3.5 or later, an ML-DSA-65 CA, both made by openssl, issue a certificate from an
+openssl request, sign a CRL revoking it and answer an openssl OCSP request about it; openssl
+verifies each, and `certval verify` validates the certificate and, with the CRL, finds it
+revoked. They also issue an ML-KEM certificate from a public key, and check what `ca` refuses.
+
 One CMS test puts an EC key and its certificate on a PKCS #11 token, as token objects it removes
 afterwards, then lists, signs with and decrypts with it through `--crypto pkcs11`. It reads
 `CERTVAL_PKCS11_MODULE`, `CERTVAL_PKCS11_TOKEN_LABEL` and `CERTVAL_PKCS11_USER_PIN`, as
 certval-pkcs11's tests do; with the module or PIN unset it says so and passes. CI runs it on
 SoftHSM.
+
+`scripts/openssl-interop.sh` runs a wider matrix against openssl than the tests do, and prints it:
+every RSA, EC, ML-KEM and ML-DSA parameter set, each key transport, KDF, key wrap and content
+algorithm, and for `ca`, a CA of each signing key type and a delegated OCSP responder, under every
+`--crypto` choice, PKCS #11 included when a module is named. Each cell says whether the choice did
+the case alone (`ok`), with software's help (`sw`), declined it (`no`), or failed. It is not part
+of `cargo test`; `-h` gives its options.
+
+```sh
+cargo build --features openssl,cryptokit
+OPENSSL=$(command -v openssl) scripts/openssl-interop.sh -c target/debug/certval
+```
 
 certval-cms is not on crates.io yet, and the providers' `cms` features are not released, so
 `Cargo.toml`'s `[patch.crates-io]` takes them from neighboring checkouts (`../certval-cms`,

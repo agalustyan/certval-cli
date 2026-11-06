@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use certval::PkiEnvironment;
 use certval_cms::{
-    CmsEnvironment, RecipientCredential, SigningCredential, SoftwareRecipientKey,
-    SoftwareSigningKey,
+    CmsEnvironment, RecipientCredential, SharedSigningCredential, SigningCredential,
+    SigningCredentialLookup, SigningCredentialSource, SoftwareRecipientKey, SoftwareSigningKey,
 };
 use x509_cert::Certificate;
 
@@ -392,6 +392,23 @@ impl Store {
             #[cfg(windows)]
             Store::CertStore(s) => s.certificates()?,
             Store::Token(s) => s.certificates()?,
+        })
+    }
+
+    /// Every key the store holds for `lookup`, whatever its certificate's key usage permits.
+    /// `CmsEnvironment::find_signing_credentials` keeps only keys permitted digitalSignature or
+    /// nonRepudiation, which leaves out a CA's key; `ca` checks keyCertSign or cRLSign itself.
+    pub fn find_signing_credentials(
+        &self,
+        env: &CmsEnvironment,
+        lookup: SigningCredentialLookup<'_>,
+    ) -> Result<Vec<SharedSigningCredential>> {
+        Ok(match self {
+            #[cfg(target_os = "macos")]
+            Store::Keychain(s) => s.find_signing_credentials(env, lookup)?,
+            #[cfg(windows)]
+            Store::CertStore(s) => s.find_signing_credentials(env, lookup)?,
+            Store::Token(s) => s.find_signing_credentials(env, lookup)?,
         })
     }
 

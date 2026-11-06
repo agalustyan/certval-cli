@@ -130,7 +130,7 @@ impl Hash {
         }
     }
 
-    fn digest(self) -> DigestAlgorithm {
+    pub(crate) fn digest(self) -> DigestAlgorithm {
         match self {
             Hash::Sha256 => DigestAlgorithm::Sha256,
             Hash::Sha384 => DigestAlgorithm::Sha384,
@@ -669,7 +669,7 @@ fn verify(args: &VerifyArgs) -> Result<bool> {
 
 // ---- files
 
-fn read_certificate(file: &str) -> Result<Certificate> {
+pub(crate) fn read_certificate(file: &str) -> Result<Certificate> {
     Ok(Certificate::from_der(&read_der(file)?)
         .map_err(|e| format!("{file}: not a certificate: {e}"))?)
 }
@@ -703,7 +703,7 @@ fn write_content(file: Option<&str>, content: &[u8]) -> Result<()> {
 }
 
 /// Bytes from hex digits, which may be separated by colons, as `display::hex` writes them.
-fn from_hex(hex: &str) -> Result<Vec<u8>> {
+pub(crate) fn from_hex(hex: &str) -> Result<Vec<u8>> {
     let hex = &hex.replace(':', "");
     if !hex.len().is_multiple_of(2) {
         return Err(format!("{hex}: an odd number of hex digits").into());

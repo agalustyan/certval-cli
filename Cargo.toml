@@ -27,8 +27,8 @@ openssl = ["dep:certval-openssl"]
 # build.
 awslc-fips = ["certval-awslc/fips"]
 # CryptoKit for --crypto security-framework, on macOS: ML-KEM-768 and ML-KEM-1024 encryption and
-# decryption, and ML-DSA-65 and ML-DSA-87 verification. Needs Xcode's Swift toolchain with the 26
-# SDK to build, and macOS 26 to run; elsewhere it does nothing.
+# decryption, and ML-DSA-65 and ML-DSA-87 signing and verification. Needs Xcode's Swift toolchain
+# with the 26 SDK to build, and macOS 26 to run; elsewhere it does nothing.
 cryptokit = ["certval-security-framework/pqc"]
 
 [dependencies]
@@ -49,10 +49,13 @@ getrandom = { version = "0.4.3", features = ["sys_rng"] }
 pem-rfc7468 = { version = "1.0.0", features = ["alloc"] }
 rand_core = "0.10.1"
 reqwest = { version = "0.13.4", default-features = false }
+sha1 = "0.11.0"
 sha2 = "0.11.0"
+signature = "3.0.0"
 spki = "0.8.1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
-x509-cert = "0.3.0"
+x509-cert = { version = "0.3.0", features = ["builder"] }
+x509-ocsp = { version = "0.3.0-rc.0", features = ["builder", "std"] }
 
 [dev-dependencies]
 # The CMS tests put a key openssl made on a PKCS #11 token, which takes the private scalar.

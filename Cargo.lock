@@ -358,10 +358,13 @@ dependencies = [
  "rand_core",
  "reqwest",
  "sec1",
+ "sha1",
  "sha2",
+ "signature",
  "spki",
  "tokio",
  "x509-cert",
+ "x509-ocsp",
 ]
 
 [[package]]
@@ -3053,6 +3056,21 @@ dependencies = [
  "signature",
  "spki",
  "tls_codec",
+]
+
+[[package]]
+name = "x509-ocsp"
+version = "0.3.0-rc.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24e12c9a7f47a2a518e34d822c083d6bc21736d58d3425707244e046923efb79"
+dependencies = [
+ "const-oid",
+ "der",
+ "digest",
+ "rand_core",
+ "signature",
+ "spki",
+ "x509-cert",
 ]
 
 [[package]]
