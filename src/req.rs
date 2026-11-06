@@ -3,8 +3,8 @@
 //!
 //! The key is a PKCS #8 file, taken into the chosen implementation as a key with no certificate
 //! (certval-cms's `SigningKey`): software, OpenSSL, AWS-LC, Security.framework, which with the
-//! `cryptokit` feature holds an ML-DSA key in CryptoKit, or CNG, for an RSA or EC key. A request
-//! asks for the extensions the
+//! `cryptokit` feature holds an ML-DSA key in CryptoKit, or CNG, for an RSA or EC key, and an
+//! ML-DSA key where Windows' CNG has ML-DSA. A request asks for the extensions the
 //! arguments choose, as `openssl req -addext` does; a self-signed certificate contains them. A key
 //! that cannot sign, such as an ML-KEM key, has neither: `certval ca issue --public-key` certifies
 //! it.

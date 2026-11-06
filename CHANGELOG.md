@@ -27,7 +27,9 @@ an increase to the minimum supported Rust version is not treated as a breaking c
 - `req` makes a certificate request, or with `--x509` a self-signed certificate, with a PKCS #8 key
   taken into the `--crypto` implementation as a key with no certificate (certval-cms's `SigningKey`):
   software, OpenSSL, AWS-LC and Security.framework, with CryptoKit for ML-DSA, and CNG for RSA and
-  EC keys.
+  EC keys, and ML-DSA keys where Windows' CNG has ML-DSA.
+- `--crypto cng` signs and verifies ML-DSA-44, -65 and -87 where Windows' CNG has ML-DSA, through
+  certval-cng: `cms sign`, `cms verify`, `verify`, `ca` and `req`.
 
 ## [0.1.0-rc.1] - 2026-10-31
 

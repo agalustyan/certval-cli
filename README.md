@@ -170,8 +170,8 @@ certval req --key root.key --subject "CN=Test Root" --x509 --ca --days 3650 --ou
 
 Signs with a key that has no certificate yet: a PKCS #8 key, taken into the `--crypto`
 implementation as one, under software, OpenSSL, AWS-LC, Security.framework, which with the
-`cryptokit` feature holds an ML-DSA key in CryptoKit, or CNG, for an RSA or EC key. PKCS #11 does
-not offer such keys yet.
+`cryptokit` feature holds an ML-DSA key in CryptoKit, or CNG, for an RSA or EC key, and an ML-DSA
+key where Windows' CNG has ML-DSA. PKCS #11 does not offer such keys yet.
 A request asks for the extensions `--ca`, `--key-usage`, `--eku`, `--san-email` and `--san-dns`
 choose, as `openssl req -addext` does; with `--x509`, a self-signed certificate contains them, with
 `--days` and `--serial` as for `ca issue`. A key that cannot sign, such as an ML-KEM key, has no
@@ -188,7 +188,7 @@ their cryptographic operations:
 | `openssl` | the system's OpenSSL 3, through [certval-openssl](https://github.com/carl-wallace/certval-openssl) | with the `openssl` feature, not on Windows |
 | `aws-lc` | AWS-LC, through [certval-awslc](https://github.com/carl-wallace/certval-awslc) | everywhere; its FIPS module with the `awslc-fips` feature |
 | `security-framework` | Security.framework, through [certval-security-framework](https://github.com/carl-wallace/certval-security-framework); with the `cryptokit` feature, CryptoKit for ML-KEM-768/1024 and ML-DSA-65/87 signing and verification | macOS; `cryptokit` needs the 26 SDK to build and macOS 26 to run |
-| `cng` | CNG, through [certval-cng](https://github.com/carl-wallace/certval-cng) | Windows |
+| `cng` | CNG, through [certval-cng](https://github.com/carl-wallace/certval-cng); ML-DSA-44/65/87 signing and verification where Windows' CNG has ML-DSA | Windows |
 | `pkcs11` | a PKCS #11 module, through [certval-pkcs11](https://github.com/carl-wallace/certval-pkcs11) | everywhere |
 
 The choice is registered ahead of software, so software answers only what it declines; `--only`
