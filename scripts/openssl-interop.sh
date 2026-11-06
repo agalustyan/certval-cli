@@ -173,6 +173,11 @@ esac
 
 wanted() { case ",$OPS," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 
+# contains TEXT PATTERN: whether TEXT holds PATTERN, matched in the shell. Not `printf | grep -q`:
+# grep -q exits at the first match, and under pipefail the writer's SIGPIPE, which a text larger
+# than the pipe buffer (an ML-DSA-87 response's dump) can get, fails the pipeline as a non-match.
+contains() { case $1 in *"$2"*) return 0 ;; *) return 1 ;; esac; }
+
 # ---- openssl's version decides the post-quantum cases
 
 version=$("$OPENSSL" version | awk '{print $2}')
@@ -393,7 +398,7 @@ attempt() {
         else
             outcome=DIFFER; note "$b" "$outcome" "$LAST_CMD"$'\n'"$CHECK_MSG"
         fi
-    elif printf '%s\n' "$only_err" | grep -q 'not performed by this implementation'; then
+    elif contains "$only_err" 'not performed by this implementation'; then
         outcome=no; note "$b" "$outcome" "$LAST_CMD"$'\n'"$only_err"
     else
         outcome=FAIL; note "$b" "$outcome" "$LAST_CMD"$'\n'"with --only: $only_err"$'\n'"without: $(cat "$CV_ERR")"
@@ -697,7 +702,7 @@ openssl_verifies_crl() {
     if ! out=$(ossl crl -inform DER -in "$WORK/ca.crl" -noout -verify -CAfile "$ISSUER" 2>&1); then
         CHECK_MSG="openssl crl -verify: $out"; return 1
     fi
-    if ! ossl crl -inform DER -in "$WORK/ca.crl" -noout -text 2>&1 | grep -q "Serial Number: $CRL_SERIAL"; then
+    if ! out=$(ossl crl -inform DER -in "$WORK/ca.crl" -noout -text 2>&1) || ! contains "$out" "Serial Number: $CRL_SERIAL"; then
         CHECK_MSG="the CRL does not list $CRL_SERIAL"; return 1
     fi
 }
@@ -727,10 +732,10 @@ openssl_verifies_ocsp() {
             -verify_other "$ISSUER" -resp_text 2>&1); then
         CHECK_MSG="openssl ocsp: $out"; return 1
     fi
-    if ! printf '%s\n' "$out" | grep -q 'Response verify OK'; then
+    if ! contains "$out" 'Response verify OK'; then
         CHECK_MSG="openssl ocsp: $out"; return 1
     fi
-    if ! printf '%s\n' "$out" | grep -q 'Cert Status: revoked'; then
+    if ! contains "$out" 'Cert Status: revoked'; then
         CHECK_MSG="openssl ocsp: the status is not revoked: $out"; return 1
     fi
 }
