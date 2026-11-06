@@ -13,6 +13,7 @@ mod crypto;
 mod display;
 mod input;
 mod ocsp;
+mod req;
 mod trust;
 mod verify;
 mod x509;
@@ -54,6 +55,8 @@ enum Command {
     /// Issue certificates, sign CRLs and answer OCSP requests with a CA's key
     #[command(subcommand)]
     Ca(ca::Command),
+    /// Make a certificate request, or a self-signed certificate, with a key that has no certificate
+    Req(req::Args),
 }
 
 /// Restores the default action for SIGPIPE, which Rust programs otherwise ignore, so that output
@@ -97,6 +100,7 @@ async fn run(cli: Cli) -> ExitCode {
         Command::Cms(command) => cms::run(&command),
         Command::Cred(command) => cred::run(&command),
         Command::Ca(command) => ca::run(&command),
+        Command::Req(args) => req::run(&args),
     };
     match outcome {
         Ok(true) => ExitCode::SUCCESS,

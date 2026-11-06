@@ -14,7 +14,8 @@ use std::sync::Arc;
 use certval::PkiEnvironment;
 use certval_cms::{
     CmsEnvironment, RecipientCredential, SharedSigningCredential, SigningCredential,
-    SigningCredentialLookup, SigningCredentialSource, SoftwareRecipientKey, SoftwareSigningKey,
+    SigningCredentialLookup, SigningCredentialSource, SigningKey, SoftwareKey,
+    SoftwareRecipientKey, SoftwareSigningKey,
 };
 use x509_cert::Certificate;
 
@@ -255,6 +256,30 @@ impl CryptoArgs {
         })
     }
 
+    /// A key of the chosen implementation, with no certificate, for the PKCS #8 key `pkcs8`: to
+    /// sign its own certificate request or a self-signed certificate.
+    pub fn signing_key(&self, pkcs8: &[u8]) -> Result<Box<dyn SigningKey>> {
+        Ok(match self.crypto {
+            Crypto::Software => Box::new(SoftwareKey::from_pkcs8_der(pkcs8)?),
+            #[cfg(all(feature = "openssl", not(windows)))]
+            Crypto::Openssl => Box::new(certval_openssl::OpenSslKey::from_pkcs8_der(pkcs8)?),
+            Crypto::AwsLc => Box::new(certval_awslc::AwsLcKey::from_pkcs8_der(pkcs8)?),
+            #[cfg(target_os = "macos")]
+            Crypto::SecurityFramework => security_framework_key(pkcs8)?,
+            #[cfg(windows)]
+            Crypto::Cng => {
+                return Err(
+                    "--crypto cng does not yet sign with a key that has no certificate".into(),
+                )
+            }
+            Crypto::Pkcs11 => {
+                return Err(
+                    "--crypto pkcs11 does not yet sign with a key that has no certificate".into(),
+                )
+            }
+        })
+    }
+
     /// The store of keys the chosen implementation holds.
     pub fn store(&self) -> Result<Store> {
         Store::open(self.crypto, &self.pkcs11)
@@ -326,6 +351,28 @@ fn security_framework_signer(
     Ok(Box::new(
         certval_security_framework::import_pkcs8(certificate, pkcs8)?.1,
     ))
+}
+
+/// A Security.framework key with no certificate for the PKCS #8 key `pkcs8`: an ML-DSA key in
+/// CryptoKit with the `cryptokit` feature, and an RSA or EC key in Security.framework.
+#[cfg(target_os = "macos")]
+fn security_framework_key(pkcs8: &[u8]) -> Result<Box<dyn SigningKey>> {
+    #[cfg(feature = "cryptokit")]
+    {
+        use const_oid::db::fips204::{ID_ML_DSA_44, ID_ML_DSA_65, ID_ML_DSA_87};
+        let oid = pkcs8::PrivateKeyInfoRef::try_from(pkcs8)
+            .map_err(|e| format!("not a PKCS #8 key: {e}"))?
+            .algorithm
+            .oid;
+        if [ID_ML_DSA_44, ID_ML_DSA_65, ID_ML_DSA_87].contains(&oid) {
+            return Ok(Box::new(
+                certval_security_framework::CryptoKitKey::from_pkcs8_der(pkcs8)?,
+            ));
+        }
+    }
+    Ok(Box::new(certval_security_framework::import_pkcs8_key(
+        pkcs8,
+    )?))
 }
 
 fn pkcs11_key_file() -> Box<dyn std::error::Error> {
