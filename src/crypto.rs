@@ -248,9 +248,7 @@ impl CryptoArgs {
                 pkcs8,
             )?),
             #[cfg(target_os = "macos")]
-            Crypto::SecurityFramework => {
-                Box::new(certval_security_framework::import_pkcs8(certificate, pkcs8)?.1)
-            }
+            Crypto::SecurityFramework => security_framework_signer(certificate, pkcs8)?,
             #[cfg(windows)]
             Crypto::Cng => Box::new(certval_cng::import_pkcs8(certificate, pkcs8)?.1),
             Crypto::Pkcs11 => return Err(pkcs11_key_file()),
@@ -298,6 +296,35 @@ fn security_framework_recipient(
     }
     Ok(Box::new(
         certval_security_framework::import_pkcs8(certificate, pkcs8)?.0,
+    ))
+}
+
+/// A Security.framework signing credential for the PKCS #8 key `pkcs8`: an ML-DSA key in CryptoKit
+/// with the `cryptokit` feature, and an RSA or EC key in Security.framework.
+#[cfg(target_os = "macos")]
+fn security_framework_signer(
+    certificate: Certificate,
+    pkcs8: &[u8],
+) -> Result<Box<dyn SigningCredential>> {
+    #[cfg(feature = "cryptokit")]
+    {
+        use const_oid::db::fips204::{ID_ML_DSA_44, ID_ML_DSA_65, ID_ML_DSA_87};
+        let oid = certificate
+            .tbs_certificate()
+            .subject_public_key_info()
+            .algorithm
+            .oid;
+        if [ID_ML_DSA_44, ID_ML_DSA_65, ID_ML_DSA_87].contains(&oid) {
+            return Ok(Box::new(
+                certval_security_framework::CryptoKitSigningKey::from_pkcs8_der(
+                    certificate,
+                    pkcs8,
+                )?,
+            ));
+        }
+    }
+    Ok(Box::new(
+        certval_security_framework::import_pkcs8(certificate, pkcs8)?.1,
     ))
 }
 

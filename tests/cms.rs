@@ -75,9 +75,9 @@ fn cryptos() -> Vec<Choice> {
     if cfg!(all(target_os = "macos", feature = "cryptokit")) {
         cryptos.push(Choice {
             name: "security-framework",
-            // CommonCrypto has no GCM, and CryptoKit's ML-DSA is not used for signing. The ML-KEM
-            // and ML-DSA cases use ML-KEM-768 and ML-DSA-65, which CryptoKit offers.
-            declines: &[Case::Gcm, Case::MlDsaSigning],
+            // CommonCrypto has no GCM. The ML-KEM and ML-DSA cases use ML-KEM-768 and ML-DSA-65,
+            // which CryptoKit offers.
+            declines: &[Case::Gcm],
         });
     } else if cfg!(target_os = "macos") {
         cryptos.push(Choice {

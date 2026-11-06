@@ -16,7 +16,8 @@ an increase to the minimum supported Rust version is not treated as a breaking c
   on macOS, CNG on Windows, and a PKCS #11 module, named with `--pkcs11-module`, `--pkcs11-token`
   and `--pkcs11-pin`. A `--key` file is imported into the chosen implementation.
 - The `cryptokit` feature gives `--crypto security-framework` CryptoKit's ML-KEM-768 and ML-KEM-1024,
-  for encryption and for decryption with a PKCS #8 key, and ML-DSA-65 and ML-DSA-87 verification.
+  for encryption and for decryption with a PKCS #8 key, and ML-DSA-65 and ML-DSA-87, for signing
+  with a PKCS #8 key and for verification.
 - `cred list` lists the keys the keychain, the current user's certificate store or a PKCS #11 token
   holds, and without `--key`, `cms decrypt` and `cms sign` use them: decrypting by the message's
   recipient identifiers, and signing with the key chosen by `--cert`, `--email` or `--skid`.
