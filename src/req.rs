@@ -64,7 +64,7 @@ pub fn run(args: &Args) -> Result<bool> {
     let key: Box<dyn SigningKey> = args.crypto.signing_key(&read_der(&args.key)?)?;
     let digest = args.digest.digest();
     let signer = if args.pss {
-        CredentialSigner::with_algorithm(&env, key.as_ref(), digest, rsa_pss(digest)?)
+        CredentialSigner::with_algorithm(&env, key.as_ref(), digest, rsa_pss(digest)?)?
     } else {
         CredentialSigner::new(&env, key.as_ref(), digest)?
     };

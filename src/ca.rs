@@ -193,7 +193,7 @@ impl SigningArgs {
     ) -> Result<CredentialSigner<'a>> {
         let digest = self.digest.digest();
         Ok(if self.pss {
-            CredentialSigner::with_algorithm(env, credential, digest, rsa_pss(digest)?)
+            CredentialSigner::with_algorithm(env, credential, digest, rsa_pss(digest)?)?
         } else {
             CredentialSigner::new(env, credential, digest)?
         })
