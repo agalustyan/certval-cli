@@ -19,12 +19,15 @@ name = "certval"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["awslc"]
+# AWS-LC built from its ordinary source for --crypto aws-lc. Needs a C compiler only. Turn it off with
+# --no-default-features to build awslc-fips, since aws-lc-rs refuses to build with both.
+awslc = ["certval-awslc/non-fips"]
 # OpenSSL as a --crypto choice, through certval-openssl, for certificate verification and CMS. Needs
 # the system's OpenSSL 3 to build, and is not offered on Windows.
 openssl = ["dep:certval-openssl"]
 # AWS-LC's FIPS module for --crypto aws-lc, in place of its ordinary build. Needs CMake and Go to
-# build.
+# build, and the awslc feature off.
 awslc-fips = ["certval-awslc/fips"]
 # CryptoKit for --crypto security-framework, on macOS: ML-KEM-768 and ML-KEM-1024 encryption and
 # decryption, and ML-DSA-65 and ML-DSA-87 signing and verification. Needs Xcode's Swift toolchain
@@ -34,7 +37,7 @@ cryptokit = ["certval-security-framework/pqc"]
 [dependencies]
 certval = { version = "0.2.0-rc.2", features = ["remote", "rsa", "pqc"] }
 certval-cms = { version = "0.1.0-rc.1", features = ["pqc"] }
-certval-awslc = { version = "0.1.0-rc.1", features = ["cms"] }
+certval-awslc = { version = "0.1.0-rc.1", default-features = false, features = ["cms"] }
 certval-pkcs11 = { version = "0.1.0-rc.1", features = ["cms"] }
 certval_stores_core = "0.1.0-rc.1"
 certval_stores_fpki = "1.0.0-rc.1"
