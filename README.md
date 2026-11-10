@@ -169,9 +169,9 @@ certval req --key root.key --subject "CN=Test Root" --x509 --ca --days 3650 --ou
 ```
 
 Signs with a key that has no certificate yet: a PKCS #8 key, taken into the `--crypto`
-implementation as one, under software, OpenSSL, AWS-LC, Security.framework, which with the
-`cryptokit` feature holds an ML-DSA key in CryptoKit, or CNG, for an RSA or EC key, and an ML-DSA
-key where Windows' CNG has ML-DSA. PKCS #11 does not offer such keys yet.
+implementation as one, under software, OpenSSL, AWS-LC, Security.framework or CNG.
+Security.framework holds an ML-DSA key in CryptoKit, with the `cryptokit` feature; CNG holds an RSA
+or EC key, and an ML-DSA key where Windows' CNG has ML-DSA. PKCS #11 does not offer such keys yet.
 A request asks for the extensions `--ca`, `--key-usage`, `--eku`, `--san-email` and `--san-dns`
 choose, as `openssl req -addext` does; with `--x509`, a self-signed certificate contains them, with
 `--days` and `--serial` as for `ca issue`. A key that cannot sign, such as an ML-KEM key, has no
